@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TicketDesk — Login</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#07090f;--bg2:#0d1117;--surface:#111827;--surface2:#1a2235;
+  --border:#1e2d3d;--border2:#2d3f55;
+  --accent:#6366f1;--accent2:#818cf8;
+  --green:#34d399;--red:#f87171;
+  --text:#f0f4ff;--text2:#8b9dc3;--text3:#3d5275;
+  --sans:'Outfit',sans-serif;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+body{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+body::before{
+  content:'';position:fixed;inset:0;
+  background:radial-gradient(ellipse 80% 50% at 50% -20%,rgba(99,102,241,.15),transparent),
+             radial-gradient(ellipse 50% 40% at 80% 80%,rgba(244,114,182,.06),transparent);
+  pointer-events:none;
+}
+.card{
+  width:100%;max-width:420px;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:20px;padding:40px;
+  box-shadow:0 32px 80px rgba(0,0,0,.5);
+  position:relative;z-index:1;
+}
+.logo{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:32px}
+.logo-icon{
+  width:48px;height:48px;border-radius:14px;
+  background:linear-gradient(135deg,var(--accent),#a78bfa);
+  display:flex;align-items:center;justify-content:center;
+  font-size:22px;box-shadow:0 8px 24px rgba(99,102,241,.4);
+}
+.logo-text{font-size:22px;font-weight:700}
+.logo-sub{font-size:12px;color:var(--text3);margin-top:2px}
+.form{display:flex;flex-direction:column;gap:16px}
+.field{display:flex;flex-direction:column;gap:6px}
+label{font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+input{
+  background:var(--bg2);border:1px solid var(--border);border-radius:10px;
+  padding:12px 16px;color:var(--text);font-family:var(--sans);font-size:14px;
+  outline:none;transition:.15s;width:100%;
+}
+input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.15)}
+input::placeholder{color:var(--text3)}
+.btn{
+  width:100%;padding:13px;border:none;border-radius:10px;
+  background:linear-gradient(135deg,var(--accent),#7c3aed);
+  color:#fff;font-family:var(--sans);font-size:14px;font-weight:600;
+  cursor:pointer;transition:.15s;margin-top:4px;
+  box-shadow:0 4px 16px rgba(99,102,241,.35);
+}
+.btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(99,102,241,.45)}
+.btn:active{transform:translateY(0)}
+.btn:disabled{opacity:.6;cursor:not-allowed;transform:none}
+.alert{padding:12px 16px;border-radius:10px;font-size:13px;display:none;align-items:center;gap:8px}
+.alert.err{background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.3);color:#f87171;display:flex}
+.alert.ok{background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.3);color:#34d399;display:flex}
+.hint{font-size:12px;color:var(--text3);text-align:center;margin-top:8px;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <div class="logo-icon">🎫</div>
+    <div>
+      <div class="logo-text">TicketDesk</div>
+      <div class="logo-sub">Admin Panel</div>
+    </div>
+  </div>
+
+  <div id="alert" class="alert"></div>
+
+  <form class="form" id="login-form" onsubmit="doLogin(event)">
+    <div class="field">
+      <label>Username</label>
+      <input id="l-user" type="text" placeholder="Enter your username" autocomplete="username" required>
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input id="l-pass" type="password" placeholder="Enter your password" autocomplete="current-password" required>
+    </div>
+    <button class="btn" type="submit" id="login-btn">Sign In</button>
+    <p class="hint" id="first-time-hint" style="display:none">
+      No accounts exist yet.<br>
+      The first account you create will be <b style="color:var(--accent2)">admin</b>.<br><br>
+      <button type="button" onclick="showFirstSetup()" style="background:none;border:1px solid var(--border2);color:var(--text2);padding:8px 16px;border-radius:8px;cursor:pointer;font-family:var(--sans);font-size:12px;">Create First Admin Account</button>
+    </p>
+  </form>
+
+  <!-- First-time setup (only shown if no accounts exist) -->
+  <form class="form" id="setup-form" style="display:none" onsubmit="doFirstSetup(event)">
+    <div class="field">
+      <label>Username</label>
+      <input id="s-user" type="text" placeholder="Choose admin username" required>
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input id="s-pass" type="password" placeholder="Choose a strong password" required>
+    </div>
+    <div class="field">
+      <label>Your Name <span style="color:var(--text3);font-weight:400">(optional)</span></label>
+      <input id="s-tag" type="text" placeholder="e.g. LaGgIs">
+    </div>
+    <button class="btn" type="submit" id="setup-btn">Create Admin Account</button>
+    <p class="hint">This is a one-time setup. After this, only admins can create new accounts from inside the panel.</p>
+  </form>
+</div>
+
+<script>
+const API = window.location.origin;
+
+function showAlert(msg, type) {
+  const el = document.getElementById('alert');
+  el.textContent = (type === 'err' ? '✕ ' : '✓ ') + msg;
+  el.className = 'alert ' + type;
+}
+function hideAlert() { document.getElementById('alert').className = 'alert'; }
+
+function showFirstSetup() {
+  document.getElementById('login-form').style.display = 'none';
+  document.getElementById('setup-form').style.display = 'flex';
+  hideAlert();
+}
+
+async function checkFirstTime() {
+  try {
+    const res = await fetch(API + '/api/login/has-admins');
+    if (res.ok) {
+      const { hasAdmins } = await res.json();
+      if (!hasAdmins) {
+        document.getElementById('first-time-hint').style.display = 'block';
+      }
+    }
+  } catch {}
+}
+
+async function doLogin(e) {
+  e.preventDefault();
+  hideAlert();
+  const btn = document.getElementById('login-btn');
+  btn.disabled = true; btn.textContent = 'Signing in...';
+  try {
+    const res = await fetch(API + '/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: document.getElementById('l-user').value.trim(),
+        password: document.getElementById('l-pass').value,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) { showAlert(data.error || 'Login failed', 'err'); btn.disabled=false; btn.textContent='Sign In'; return; }
+    localStorage.setItem('td_bootstrap_token', data.token);
+    localStorage.setItem('td_servers', JSON.stringify([{name:'PenguinHosting',url:API,token:data.token,icon:'🎫'}]));
+    localStorage.setItem('td_current', '0');
+    showAlert('Welcome back! Redirecting...', 'ok');
+    setTimeout(() => { window.location.href = '/'; }, 800);
+  } catch (err) {
+    showAlert('Connection error: ' + err.message, 'err');
+    btn.disabled=false; btn.textContent='Sign In';
+  }
+}
+
+async function doFirstSetup(e) {
+  e.preventDefault();
+  hideAlert();
+  const btn = document.getElementById('setup-btn');
+  btn.disabled=true; btn.textContent='Creating...';
+  try {
+    const res = await fetch(API + '/api/login/setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username:    document.getElementById('s-user').value.trim(),
+        password:    document.getElementById('s-pass').value,
+        discord_tag: document.getElementById('s-tag').value.trim(),
+        first_time:  true,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) { showAlert(data.error || 'Failed', 'err'); btn.disabled=false; btn.textContent='Create Admin Account'; return; }
+    showAlert('Admin account created! Signing in...', 'ok');
+    // Auto login
+    setTimeout(async () => {
+      document.getElementById('l-user').value = document.getElementById('s-user').value;
+      document.getElementById('l-pass').value = document.getElementById('s-pass').value;
+      document.getElementById('setup-form').style.display = 'none';
+      document.getElementById('login-form').style.display = 'flex';
+      document.getElementById('login-form').requestSubmit();
+    }, 1000);
+  } catch (err) {
+    showAlert('Error: ' + err.message, 'err');
+    btn.disabled=false; btn.textContent='Create Admin Account';
+  }
+}
+
+// Check if already logged in
+const existing = localStorage.getItem('td_bootstrap_token');
+if (existing) {
+  fetch(API + '/api/login/me', { headers: { Authorization: 'Bearer ' + existing } })
+    .then(r => { if (r.ok) window.location.href = '/'; })
+    .catch(() => {});
+}
+
+checkFirstTime();
+</script>
+</body>
+</html>

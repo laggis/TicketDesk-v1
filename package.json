@@ -1,8 +1,22 @@
 {
+  "name": "ticketdesk",
+  "version": "2.0.0",
+  "description": "PenguinHosting Ticket Bot + Admin Panel — unified",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev":   "nodemon index.js"
+  },
   "dependencies": {
-    "discord.js": "^14.16.3",
-    "mysql2": "^3.11.4",
-    "uuid": "^11.0.3",
-    "dotenv": "^16.4.5"
+    "bcryptjs":   "^2.4.3",
+    "cors":       "^2.8.5",
+    "discord.js": "^14.0.0",
+    "dotenv":     "^16.0.0",
+    "express":    "^4.18.0",
+    "groq-sdk":   "^0.3.0",
+    "helmet":     "^7.0.0",
+    "jsonwebtoken":"^9.0.0",
+    "mysql2":     "^3.0.0",
+    "uuid":       "^9.0.0"
   }
 }

@@ -1,102 +1,136 @@
-# Discord Ticket Bot
+# 🎫 TicketDesk v2
 
-A Discord.js v14 ticket system with mod‑log, transcripts, cooldowns, and duplicate‑panel protection.
+Unified Discord ticket bot + admin panel. **One process. One config file. One folder.**
 
-## Features
-- Ticket panel with buttons for `Support`, `Köp`, `Övrigt`, `Panel`.
-- Slash commands: `/ticket ban`, `/ticket unban`, `/close <ticket_id>`.
-- Mod‑log embeds for banned‑attempts, bans, unbans, closes, unauthorized closes.
-- Per‑user cooldowns: create 15s; staff moderation 5s; close (command & button) 5s.
-- HTML transcript generation posted to a transcript channel.
-- Transcript is also DM’d to the ticket opener on close (if DMs are open).
-- Auto‑deletes the ticket channel after close (configurable delay).
-- Persistent panel memory: stores the panel message id to avoid duplicate panels after restarts.
+## Quick Start
 
-## Requirements
-- Node.js 18+ (recommended).
-- A Discord application/bot added to your server.
-- MySQL reachable from the bot.
-
-## Environment Variables (.env)
-Set these before running:
-- `BOT_TOKEN` – Discord bot token
-- `TICKET_CHANNEL_ID` – Channel for the ticket panel
-- `SUPPORT_CATEGORY_ID`, `KOP_CATEGORY_ID`, `OVRIGT_CATEGORY_ID`, `PANEL_CATEGORY_ID` – Category ids for ticket channels
-- `SUPPORT_ROLE_IDS` – Comma‑separated role ids allowed to close tickets (fallback to `SUPPORT_ROLE_ID`)
-- `TRANSCRIPT_CHANNEL_ID` – Channel for HTML transcripts (optional but recommended)
-- `MOD_LOG_CHANNEL_ID` – Channel for moderation logs (optional)
-- `GUILD_ID` – If set, register commands only in this guild; otherwise global
-- `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_PORT` – MySQL connection
-- `TICKET_DELETE_DELAY_MS` – Delay before auto‑deleting a ticket channel after close (default `5000`)
-
-Example for multiple support roles:
-- `SUPPORT_ROLE_IDS=985283578982195372, 985283646611136573`
-
-Example `.env` snippet:
-```
-BOT_TOKEN=your-bot-token
-TICKET_CHANNEL_ID=123456789012345678
-SUPPORT_ROLE_IDS=985283578982195372, 985283646611136573
-TRANSCRIPT_CHANNEL_ID=123456789012345678
-MOD_LOG_CHANNEL_ID=123456789012345678
-GUILD_ID=your-guild-id
-DB_HOST=localhost
-DB_USER=discord
-DB_PASSWORD=secret
-DB_NAME=discordbot
-DB_PORT=3307
-TICKET_DELETE_DELAY_MS=5000
+### 1. Install
+```bash
+npm install
 ```
 
+### 2. Configure
+Copy `.env.example` to `.env` and fill in your values:
+```bash
+cp .env.example .env
+```
 
-## Install & Run
-1. `npm install`
-2. Ensure `.env` is configured.
-3. `node Ticketbot.js`
-4. Watch logs for: bot login and slash command registration.
+Only required fields:
+- `BOT_TOKEN` — your Discord bot token
+- `TICKET_CHANNEL_ID` — channel where the panel embed goes
+- `DB_*` — your MySQL connection details
+- `JWT_SECRET` — any long random string
 
-## Commands & Flow
-- Click a panel button → modal → ticket channel created under the mapped category.
-- `/ticket ban @user [reason]` – prevents user from opening tickets (logged to mod‑log).
-- `/ticket unban @user` – removes ban (logged).
-- `/close <ticket_id>` or close button – closes ticket, generates transcript, updates DB, logs to mod‑log.
+### 3. Run MySQL migration (first time only)
+If upgrading from v1, run this to add new columns:
+```sql
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS pending_close TINYINT(1) DEFAULT 0;
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS priority VARCHAR(10) DEFAULT 'normal';
+ALTER TABLE ticket_messages ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(500);
+CREATE TABLE IF NOT EXISTS ticket_categories (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(50) NOT NULL UNIQUE,
+  emoji VARCHAR(10) DEFAULT '🎫',
+  description VARCHAR(255),
+  discord_category_id VARCHAR(20),
+  color VARCHAR(7) DEFAULT '#6366f1',
+  sort_order INT DEFAULT 0,
+  enabled TINYINT(1) DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
 
-## Cooldowns & Logging
-- Create: 15s per user; Staff moderation: 5s; Close: 5s.
-- Mod‑log includes actor, target, channel, ticket id, and reason when available.
+### 4. Start
+```bash
+node index.js
+```
 
-## Transcripts
-- Bot fetches channel history, builds an HTML transcript, and posts it in `TRANSCRIPT_CHANNEL_ID`.
-- Transcript is also DM’d to the ticket opener on close (if DMs are open).
+That's it. One terminal, one process.
 
-## Close Flow
-- Staff closes via `/close <ticket_id>` or the close button.
-- Bot generates the HTML transcript and posts in `TRANSCRIPT_CHANNEL_ID`.
-- Bot DMs the opener with the embed and the transcript.
-- Bot updates DB status to `Stängd` and removes opener’s view permission.
-- Bot posts a final embed in the channel and schedules deletion.
-- Channel is deleted after `TICKET_DELETE_DELAY_MS` (default 5s).
+---
 
-## Panel Persistence
-- File `panel_state.json` is created automatically to store `{ channelId, messageId }`.
-- On restart the bot fetches that message and skips posting a new panel.
-- To force a new panel: delete `panel_state.json` and the old panel message.
+## File Structure
 
-## Notable Fixes & Improvements
-- Replaced deprecated `avatarURL()` with `displayAvatarURL()`.
-- Guarded permission overwrites; supports multiple support roles via `SUPPORT_ROLE_IDS`.
-- Switched button styles to `ButtonStyle` enums.
-- Removed duplicate top‑level command registration (fixed `await` syntax error).
-- Added duplicate panel protection and persistent memory.
+```
+ticketdesk/
+├── index.js              ← entry point (starts everything)
+├── .env                  ← ONE config file for everything
+├── package.json
+├── panel_state.json      ← auto-created, tracks panel embed
+│
+├── bot/
+│   ├── bot.js            ← Discord bot (all interactions)
+│   └── ai.js             ← Groq AI (optional)
+│
+├── api/
+│   ├── server.js         ← Express API server
+│   ├── middleware/
+│   │   ├── auth.js
+│   │   └── errorHandler.js
+│   └── routes/
+│       ├── tickets.js
+│       ├── categories.js ← includes auto-create Discord channel
+│       ├── login.js
+│       └── stats.js
+│
+├── db/
+│   ├── pool.js           ← shared MySQL connection
+│   └── schema.js         ← auto-creates all tables on startup
+│
+└── panel/
+    ├── index.html        ← admin panel UI
+    └── login.html        ← login page
+```
 
-## Troubleshooting
-- Commands not showing: check `GUILD_ID`, bot permissions, and give Discord a minute for global commands.
-- Mod‑log/transcript warnings: set corresponding channel ids in `.env`.
-- DMs missing: users may have server DMs disabled — transcript still posts to `TRANSCRIPT_CHANNEL_ID`.
-- Channel not deleted: ensure the bot has `Manage Channels` and `View Channel` in the ticket category; check `TICKET_DELETE_DELAY_MS` (default 5000).
-- Permission errors closing tickets: verify `SUPPORT_ROLE_IDS` (or `SUPPORT_ROLE_ID`) and role assignment.
+---
 
-## Roadmap
-- Log ticket creation/open events to mod‑log.
-- Add `/ticket escalate`, `/ticket reopen`, and `/ticket stats`.
-- Persist cooldowns (e.g., Redis/MySQL) for multi‑instance setups.
+## Panel
+
+Open `http://localhost:6012` in your browser.
+
+First time: create an admin account at `http://localhost:6012/login`
+
+---
+
+## Category Management (NEW in v2)
+
+From the panel → Settings → **Ticket Categories**:
+
+- ➕ Add category with name, emoji, description
+- 🤖 **Auto-create Discord channel category** — tick the checkbox and TicketDesk creates the Discord category automatically, no copy-pasting IDs needed
+- ✏️ Edit any category
+- ✅ Enable/disable categories
+- 🗑️ Delete categories
+
+After any change the Discord panel embed **updates automatically**.
+
+---
+
+## Discord Commands
+
+| Command | Who | What |
+|---------|-----|------|
+| `/refreshpanel` | Staff | Force-refresh panel embed |
+| `/close <id>` | Staff | Close ticket by ID |
+| `/ticket ban <user>` | Mods | Ban user from tickets |
+| `/ticket unban <user>` | Mods | Unban user |
+| `/summarise` | Staff | AI summary of current ticket |
+
+---
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `BOT_TOKEN` | ✅ | Discord bot token |
+| `GUILD_ID` | ✅ | Your Discord server ID |
+| `TICKET_CHANNEL_ID` | ✅ | Channel for the panel embed |
+| `TRANSCRIPT_CHANNEL_ID` | — | Channel for transcripts |
+| `MOD_LOG_CHANNEL_ID` | — | Channel for mod logs |
+| `SUPPORT_ROLE_IDS` | ✅ | Comma-separated staff role IDs |
+| `DB_HOST/PORT/USER/PASSWORD/NAME` | ✅ | MySQL config |
+| `PORT` | — | API port (default 6012) |
+| `JWT_SECRET` | ✅ | Secret for panel login tokens |
+| `SERVER_NAME` | — | Shown in embeds (default TicketDesk) |
+| `GROQ_API_KEY` | — | Enables AI features |
+| `TICKET_DELETE_DELAY_MS` | — | Delete delay after close (default 5000) |
