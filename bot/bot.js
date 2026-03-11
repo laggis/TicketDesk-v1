@@ -19,6 +19,7 @@ const GUILD_ID           = process.env.GUILD_ID;
 const DELETE_DELAY       = parseInt(process.env.TICKET_DELETE_DELAY_MS || '5000');
 const SUPPORT_ROLE_IDS   = (process.env.SUPPORT_ROLE_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 const SERVER_NAME        = process.env.SERVER_NAME || 'TicketDesk';
+const MAX_OPEN_TICKETS_PER_USER = Math.max(1, parseInt(process.env.MAX_OPEN_TICKETS_PER_USER || '5'));
 
 // Panel state (avoids duplicate on restart)
 const STATE_PATH = path.join(__dirname, '..', 'panel_state.json');
@@ -266,7 +267,7 @@ async function pollCloseRequests() {
 async function pollPanelReplies() {
   try {
     const pending = await db(
-      "SELECT tm.*, t.channel_id FROM ticket_messages tm JOIN tickets t ON t.id=tm.ticket_id WHERE tm.discord_msg_id='pending' LIMIT 10"
+      "SELECT tm.*, t.channel_id, t.ticket_number, t.category, t.subject, t.user_tag FROM ticket_messages tm JOIN tickets t ON t.id=tm.ticket_id WHERE tm.discord_msg_id='pending' LIMIT 10"
     );
     for (const msg of pending) {
       // Atomically claim this row before processing — prevents double-send on fast polls
@@ -279,17 +280,24 @@ async function pollPanelReplies() {
       if (!msg.channel_id) { await db('UPDATE ticket_messages SET discord_msg_id="no_channel" WHERE id=?', [msg.id]); continue; }
       const ch = await client.channels.fetch(msg.channel_id).catch(() => null);
       if (!ch) { await db('UPDATE ticket_messages SET discord_msg_id="gone" WHERE id=?', [msg.id]); continue; }
-      const embed = new EmbedBuilder()
-        .setDescription(msg.content || null)
-        .setColor('#6366f1')
-        .setAuthor({ name: (msg.author_tag || 'Staff') + ' (via Panel)', iconURL: client.user.displayAvatarURL() })
-        .setTimestamp();
-
       // If there's a single image attachment, embed it directly
       let attachments = [];
       try { if (msg.attachments) attachments = JSON.parse(msg.attachments); } catch {}
       const images = attachments.filter(a => /\.(png|jpe?g|gif|webp)$/i.test(a.name || '') || (a.type || '').startsWith('image/'));
       const files  = attachments.filter(a => !images.includes(a));
+      const embed = new EmbedBuilder()
+        .setColor('#5865F2')
+        .setAuthor({ name: msg.author_tag || 'Staff', iconURL: client.user.displayAvatarURL() })
+        .setTitle('💬 Ticket Reply')
+        .setDescription((msg.content && msg.content.trim()) ? msg.content : (attachments.length ? '*Attachment(s)*' : null))
+        .addFields(
+          { name: 'Ticket', value: msg.ticket_number ? `#${msg.ticket_number}` : (msg.ticket_id ? msg.ticket_id.slice(0, 8) : '—'), inline: true },
+          { name: 'Category', value: msg.category || '—', inline: true },
+          { name: 'User', value: msg.user_tag || '—', inline: true },
+        )
+        .setFooter({ text: 'via Admin Panel' })
+        .setTimestamp();
+
       if (images[0]) embed.setImage(images[0].url);
 
       const sent = await ch.send({
@@ -350,6 +358,10 @@ client.once('ready', async () => {
       ]},
     ]},
     { name: 'close',        description: 'Stäng ticket via ID', options: [{ name: 'ticket_id', type: 3, description: 'Ticket ID', required: true }] },
+    { name: 'add',          description: 'Lägg till användare i ticket', options: [{ name: 'user', type: 6, description: 'Användare', required: true }] },
+    { name: 'remove',       description: 'Ta bort användare från ticket', options: [{ name: 'user', type: 6, description: 'Användare', required: true }] },
+    { name: 'claim',        description: 'Claima denna ticket' },
+    { name: 'priority',     description: 'Sätt prioritet på denna ticket', options: [{ name: 'level', type: 3, description: 'low / normal / urgent', required: true, choices: [{ name: 'low', value: 'low' }, { name: 'normal', value: 'normal' }, { name: 'urgent', value: 'urgent' }] }] },
     { name: 'summarise',    description: 'AI-sammanfattning av denna ticket (staff only)' },
     { name: 'refreshpanel', description: 'Uppdatera ticket-panelen (admin only)' },
   ];
@@ -442,15 +454,20 @@ client.on('interactionCreate', async interaction => {
       const [banned] = await db('SELECT reason FROM banned_users WHERE user_id=?', [user.id]);
       if (banned) return interaction.editReply({ content: '🚫 Du är bannad. Orsak: ' + banned.reason });
 
-      // Duplicate check
-      const [open] = await db("SELECT id FROM tickets WHERE created_by_id=? AND status='Öppen' LIMIT 1", [user.id]);
-      if (open) return interaction.editReply({ content: '⚠ Du har redan en öppen ticket.' });
+      const openCountRows = await db(
+        "SELECT COUNT(*) AS n FROM tickets WHERE created_by_id=? AND (status='Öppen' OR status='open')",
+        [user.id]
+      );
+      const openCount = openCountRows?.[0]?.n || 0;
+      if (openCount >= MAX_OPEN_TICKETS_PER_USER) {
+        return interaction.editReply({ content: '⚠ Du kan ha max ' + MAX_OPEN_TICKETS_PER_USER + ' öppna tickets åt gången.' });
+      }
 
       const ticketId     = uuidv4();
       const supportRoles = SUPPORT_ROLE_IDS.map(id => guild.roles.cache.get(id)).filter(Boolean);
 
       const ticketCh = await guild.channels.create({
-        name:   'ticket-' + user.username.toLowerCase().replace(/å/g,'a').replace(/ä/g,'a').replace(/ö/g,'o').replace(/[^a-z0-9-]/g,'') || 'user',
+        name:   ('ticket-' + user.username.toLowerCase().replace(/å/g,'a').replace(/ä/g,'a').replace(/ö/g,'o').replace(/[^a-z0-9-]/g,'') + '-' + ticketId.slice(0, 4)) || ('ticket-user-' + ticketId.slice(0, 4)),
         type:   ChannelType.GuildText,
         parent: discordCat,
         topic:  'ID: ' + ticketId + ' | Typ: ' + type + ' | Ämne: ' + subject,
@@ -584,6 +601,87 @@ client.on('interactionCreate', async interaction => {
     await interaction.editReply({
       embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle('🤖 AI Summary').setDescription(summary || 'Could not summarise.').setFooter({ text: 'Groq AI' })]
     });
+    return;
+  }
+
+  // ── /add <user> ──────────────────────────────────────────────────────────
+  if (interaction.isChatInputCommand() && interaction.commandName === 'add') {
+    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    if (!member || !isStaff(member)) return interaction.reply({ content: '🚫 Saknar behörighet.', flags: 64 });
+
+    const match = (interaction.channel.topic || '').match(/ID: ([a-f0-9-]{36})/);
+    if (!match) return interaction.reply({ content: '❌ Endast i ticket-kanaler.', flags: 64 });
+
+    const target = interaction.options.getUser('user', true);
+    if (target.bot) return interaction.reply({ content: '⚠ Kan inte lägga till en bot.', flags: 64 });
+
+    await interaction.deferReply({ flags: 64 });
+    const updated = await interaction.channel.permissionOverwrites.edit(target.id, {
+      ViewChannel: true,
+      SendMessages: true,
+      ReadMessageHistory: true,
+    }).catch(() => null);
+    if (!updated) return interaction.editReply({ content: '❌ Misslyckades att lägga till användaren.' });
+
+    await interaction.channel.send({ content: '✅ ' + target.toString() + ' har lagts till i denna ticket av ' + interaction.user.toString() + '.' }).catch(() => {});
+    await interaction.editReply({ content: '✅ Klar.' }).catch(() => {});
+    await modLog(interaction.guild, { action: 'AddToTicket', actor: interaction.user, target, channel: interaction.channel, ticketId: match[1] });
+    return;
+  }
+
+  if (interaction.isChatInputCommand() && interaction.commandName === 'remove') {
+    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    if (!member || !isStaff(member)) return interaction.reply({ content: '🚫 Saknar behörighet.', flags: 64 });
+
+    const match = (interaction.channel.topic || '').match(/ID: ([a-f0-9-]{36})/);
+    if (!match) return interaction.reply({ content: '❌ Endast i ticket-kanaler.', flags: 64 });
+
+    const target = interaction.options.getUser('user', true);
+    const opener = await db('SELECT created_by_id FROM tickets WHERE id=? LIMIT 1', [match[1]]).catch(() => []);
+    if (opener?.[0]?.created_by_id && target.id === opener[0].created_by_id) {
+      return interaction.reply({ content: '⚠ Kan inte ta bort ticket-skaparen.', flags: 64 });
+    }
+
+    await interaction.deferReply({ flags: 64 });
+    const removed = await interaction.channel.permissionOverwrites.delete(target.id).catch(() => null);
+    if (!removed) return interaction.editReply({ content: '❌ Misslyckades att ta bort användaren.' });
+
+    await interaction.channel.send({ content: '🧹 ' + target.toString() + ' togs bort från denna ticket av ' + interaction.user.toString() + '.' }).catch(() => {});
+    await interaction.editReply({ content: '✅ Klar.' }).catch(() => {});
+    await modLog(interaction.guild, { action: 'RemoveFromTicket', actor: interaction.user, target, channel: interaction.channel, ticketId: match[1] });
+    return;
+  }
+
+  if (interaction.isChatInputCommand() && interaction.commandName === 'claim') {
+    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    if (!member || !isStaff(member)) return interaction.reply({ content: '🚫 Saknar behörighet.', flags: 64 });
+
+    const match = (interaction.channel.topic || '').match(/ID: ([a-f0-9-]{36})/);
+    if (!match) return interaction.reply({ content: '❌ Endast i ticket-kanaler.', flags: 64 });
+
+    await interaction.deferReply({ flags: 64 });
+    await db('UPDATE tickets SET claimed_by=?, claimed_by_tag=? WHERE id=?', [interaction.user.id, interaction.user.tag, match[1]]).catch(() => null);
+    await db('INSERT INTO ticket_logs (ticket_id, staff_id, staff_tag, action) VALUES (?,?,?,?)', [match[1], interaction.user.id, interaction.user.tag, 'claim']).catch(() => null);
+    await interaction.channel.send({ content: '✋ ' + interaction.user.toString() + ' claimed this ticket.' }).catch(() => {});
+    await interaction.editReply({ content: '✅ Claimed.' }).catch(() => {});
+    await modLog(interaction.guild, { action: 'ClaimTicket', actor: interaction.user, channel: interaction.channel, ticketId: match[1] });
+    return;
+  }
+
+  if (interaction.isChatInputCommand() && interaction.commandName === 'priority') {
+    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    if (!member || !isStaff(member)) return interaction.reply({ content: '🚫 Saknar behörighet.', flags: 64 });
+
+    const match = (interaction.channel.topic || '').match(/ID: ([a-f0-9-]{36})/);
+    if (!match) return interaction.reply({ content: '❌ Endast i ticket-kanaler.', flags: 64 });
+
+    const level = interaction.options.getString('level', true);
+    await interaction.deferReply({ flags: 64 });
+    await db('UPDATE tickets SET priority=? WHERE id=?', [level, match[1]]).catch(() => null);
+    await db('INSERT INTO ticket_logs (ticket_id, staff_id, staff_tag, action, details) VALUES (?,?,?,?,?)', [match[1], interaction.user.id, interaction.user.tag, 'priority', level]).catch(() => null);
+    await interaction.channel.send({ content: '⚡ Priority set to `' + level + '` by ' + interaction.user.toString() + '.' }).catch(() => {});
+    await interaction.editReply({ content: '✅ Updated.' }).catch(() => {});
+    await modLog(interaction.guild, { action: 'SetPriority', actor: interaction.user, channel: interaction.channel, ticketId: match[1], reason: level });
     return;
   }
 

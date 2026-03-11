@@ -586,35 +586,440 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
   </main>
 </div>
 
-<!-- Ticket Modal -->
+<!-- Ticket Modal — Redesigned -->
+<style>
+/* ── Ticket Chat Modal Overhaul ───────────────────────────────────────────── */
+#t-overlay {
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+#t-overlay .t-shell {
+  width: 100%;
+  max-width: 860px;
+  height: 88vh;
+  max-height: 740px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 32px 80px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.04);
+  animation: tShellIn .22s cubic-bezier(.34,1.26,.64,1);
+}
+@keyframes tShellIn {
+  from { opacity:0; transform: scale(.96) translateY(12px); }
+  to   { opacity:1; transform: scale(1)  translateY(0); }
+}
+
+/* Header */
+.t-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px;
+  height: 58px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.t-head-icon {
+  width: 34px; height: 34px;
+  border-radius: 10px;
+  background: rgba(99,102,241,.15);
+  border: 1px solid rgba(99,102,241,.25);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+.t-head-info { flex: 1; min-width: 0; }
+.t-head-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+.t-head-sub {
+  font-size: 11px;
+  color: var(--text3);
+  font-family: var(--mono);
+  margin-top: 1px;
+}
+.t-head-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.t-close-btn {
+  width: 28px; height: 28px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text3);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px;
+  transition: .12s;
+}
+.t-close-btn:hover { background: var(--red); border-color: var(--red); color: #fff; }
+
+/* Body — two-panel layout */
+.t-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── Left: chat area ── */
+.t-chat-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+
+/* Messages */
+#t-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 20px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+#t-messages::-webkit-scrollbar { width: 4px; }
+#t-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+/* Message groups */
+.tm-group {
+  display: flex;
+  gap: 11px;
+  padding: 4px 0;
+  animation: msgSlideIn .18s ease;
+}
+@keyframes msgSlideIn {
+  from { opacity:0; transform: translateY(5px); }
+  to   { opacity:1; transform: translateY(0); }
+}
+.tm-group.tm-staff { flex-direction: row-reverse; }
+
+.tm-ava {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+  color: #fff;
+  background: var(--surface2);
+  margin-top: 2px;
+  overflow: hidden;
+}
+.tm-ava img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+.tm-ava.staff-ava { background: linear-gradient(135deg, var(--accent), #7c3aed); }
+.tm-ava.user-ava  { background: linear-gradient(135deg, #0f766e, var(--green)); }
+
+.tm-content { max-width: 68%; display: flex; flex-direction: column; gap: 3px; }
+.tm-group.tm-staff .tm-content { align-items: flex-end; }
+
+.tm-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0 4px;
+}
+.tm-group.tm-staff .tm-meta { flex-direction: row-reverse; }
+.tm-author {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text2);
+}
+.tm-group.tm-staff .tm-author { color: var(--accent2); }
+.tm-time {
+  font-size: 10px;
+  color: var(--text3);
+  font-family: var(--mono);
+}
+.tm-bubble {
+  padding: 9px 13px;
+  border-radius: 14px;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+  position: relative;
+}
+.tm-atts{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.tm-att-img{max-width:320px;width:100%;height:auto;border-radius:10px;display:block;border:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.15)}
+.tm-att-file{display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.08);color:inherit;text-decoration:none;font-size:12px}
+.tm-att-file:hover{filter:brightness(1.08)}
+/* User bubble — left */
+.tm-group.tm-user  .tm-bubble {
+  background: var(--surface2);
+  border: 1px solid rgba(255,255,255,.05);
+  border-top-left-radius: 4px;
+}
+/* Staff bubble — right, accented */
+.tm-group.tm-staff .tm-bubble {
+  background: linear-gradient(135deg, rgba(99,102,241,.22), rgba(124,58,237,.18));
+  border: 1px solid rgba(99,102,241,.3);
+  color: #e0e7ff;
+  border-top-right-radius: 4px;
+}
+.tm-pending {
+  font-size: 10px;
+  color: var(--text3);
+  font-style: italic;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.tm-pending::before {
+  content: '';
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--yellow);
+  display: inline-block;
+  animation: pendingPulse 1s ease-in-out infinite;
+}
+@keyframes pendingPulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+.t-empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text3);
+  gap: 10px;
+  padding: 40px;
+}
+.t-empty-state .t-es-icon {
+  font-size: 32px;
+  opacity: .3;
+}
+.t-empty-state p {
+  font-size: 12.5px;
+  text-align: center;
+  line-height: 1.6;
+  max-width: 240px;
+}
+
+/* Day separator */
+.t-day-sep {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  color: var(--text3);
+  font-size: 10.5px;
+  font-family: var(--mono);
+  letter-spacing: .5px;
+}
+.t-day-sep::before, .t-day-sep::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* Reply composer */
+#t-replybox {
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.t-composer {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  transition: border-color .15s;
+}
+.t-composer:focus-within {
+  border-color: rgba(99,102,241,.5);
+  box-shadow: 0 0 0 3px rgba(99,102,241,.08);
+}
+#t-reply-input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13.5px;
+  resize: none;
+  min-height: 22px;
+  max-height: 120px;
+  line-height: 1.5;
+  padding: 0;
+}
+#t-reply-input::placeholder { color: var(--text3); }
+.t-send-btn {
+  width: 34px; height: 34px;
+  border-radius: 9px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+  transition: background .12s, transform .1s, box-shadow .12s;
+}
+.t-send-btn:hover {
+  background: var(--accent2);
+  box-shadow: 0 4px 14px rgba(99,102,241,.4);
+  transform: translateY(-1px);
+}
+.t-send-btn:active { transform: scale(.94); }
+.t-send-btn:disabled { opacity: .4; cursor: not-allowed; transform: none; box-shadow: none; }
+.t-composer-hint {
+  font-size: 10.5px;
+  color: var(--text3);
+  margin-top: 6px;
+  padding: 0 2px;
+}
+
+/* ── Right: ticket metadata sidebar ── */
+.t-info-col {
+  width: 228px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  background: var(--surface);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.t-meta-section {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.t-meta-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-bottom: 10px;
+}
+.t-meta-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.t-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.t-meta-key {
+  font-size: 10px;
+  color: var(--text3);
+  font-family: var(--mono);
+  letter-spacing: .3px;
+}
+.t-meta-val {
+  font-size: 12.5px;
+  color: var(--text2);
+  font-weight: 500;
+  word-break: break-word;
+}
+.t-meta-val.mono { font-family: var(--mono); font-size: 11px; }
+
+/* Footer action buttons in sidebar */
+.t-actions {
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+}
+.t-action-btn {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text2);
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  transition: .13s;
+  text-align: left;
+}
+.t-action-btn:hover { background: var(--surface2); color: var(--text); border-color: var(--border2); }
+.t-action-btn.danger:hover { background: rgba(248,113,113,.1); border-color: rgba(248,113,113,.3); color: var(--red); }
+.t-action-btn.success:hover { background: rgba(52,211,153,.1); border-color: rgba(52,211,153,.3); color: var(--green); }
+.t-action-btn.primary:hover { background: rgba(99,102,241,.15); border-color: rgba(99,102,241,.35); color: var(--accent2); }
+</style>
+
 <div class="overlay" id="t-overlay" onclick="closeTM(event)">
-  <div class="modal" style="max-width:720px;width:95vw;height:85vh;display:flex;flex-direction:column">
-    <div class="mhead">
-      <span class="mtitle" id="t-mtitle">Ticket</span>
-      <div style="display:flex;gap:8px;align-items:center">
+  <div class="t-shell">
+    <!-- Header -->
+    <div class="t-head">
+      <div class="t-head-icon">🎫</div>
+      <div class="t-head-info">
+        <div class="t-head-title" id="t-mtitle">Ticket</div>
+        <div class="t-head-sub" id="t-head-sub">Loading…</div>
+      </div>
+      <div class="t-head-right">
         <span id="t-status-badge"></span>
-        <button class="mx" onclick="closeTMD()">✕</button>
+        <button class="t-close-btn" onclick="closeTMD()">✕</button>
       </div>
     </div>
-    <!-- Ticket info bar -->
-    <div id="t-infobar" style="padding:12px 20px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;gap:24px;flex-wrap:wrap;font-size:12px"></div>
-    <!-- Chat messages -->
-    <div id="t-messages" style="flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:8px">
-      <p style="color:var(--text3);text-align:center;padding:30px">Loading…</p>
-    </div>
-    <!-- Reply box -->
-    <div id="t-replybox" style="padding:12px 16px;border-top:1px solid var(--border);background:var(--surface);display:none">
-      <div style="display:flex;gap:8px;align-items:flex-end">
-        <textarea id="t-reply-input" placeholder="Reply to this ticket… (Ctrl+Enter to send)" 
-          style="flex:1;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 14px;color:var(--text);font-family:var(--sans);font-size:13px;resize:none;height:60px;outline:none;line-height:1.4"
-          onkeydown="if((e=event).ctrlKey&&e.key==='Enter'){e.preventDefault();sendReply()}"
-          onfocus="this.style.borderColor='var(--accent)'"
-          onblur="this.style.borderColor='var(--border)'"></textarea>
-        <button onclick="sendReply()" class="btn primary" style="padding:10px 18px;white-space:nowrap;height:60px">Send ↑</button>
+
+    <!-- Body -->
+    <div class="t-body">
+      <!-- Chat column -->
+      <div class="t-chat-col">
+        <div id="t-messages">
+          <div class="t-empty-state">
+            <div class="t-es-icon">💬</div>
+            <p>Loading conversation…</p>
+          </div>
+        </div>
+        <!-- Reply composer -->
+        <div id="t-replybox" style="display:none">
+          <div class="t-composer-hint" style="display:flex;gap:8px;align-items:center;justify-content:space-between;padding:0 4px 6px">
+            <span>Ctrl+Enter to send · Shift+Enter for new line</span>
+            <select class="fsel" id="t-canned" style="padding:6px 10px;font-size:12px" onchange="insertCanned(this.value)">
+              <option value="">Canned reply…</option>
+            </select>
+          </div>
+          <div class="t-composer">
+            <textarea id="t-reply-input" placeholder="Reply to this ticket…" rows="1"
+              onkeydown="if((e=event).ctrlKey&&e.key==='Enter'){e.preventDefault();sendReply()}"
+              oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
+            <button class="t-send-btn" onclick="sendReply()" title="Send (Ctrl+Enter)">↑</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Metadata sidebar -->
+      <div class="t-info-col">
+        <div class="t-meta-section" id="t-infobar">
+          <div class="t-meta-label">Ticket Details</div>
+          <div class="t-meta-row" style="color:var(--text3);font-size:12px">Loading…</div>
+        </div>
+        <div class="t-actions" id="t-mfoot"></div>
       </div>
     </div>
-    <!-- Footer actions -->
-    <div class="mfoot" id="t-mfoot" style="border-top:1px solid var(--border)"></div>
   </div>
 </div>
 
@@ -650,6 +1055,30 @@ let SERVERS = JSON.parse(localStorage.getItem('td_servers') || '[]');
 let CURRENT = parseInt(localStorage.getItem('td_current') || '0');
 let PUSH = { enabled: false, lastSeen: new Set(), timer: null };
 const S = { status:'all', page:1, archPage:1, archResults:[] };
+const CANNED_REPLIES = [
+  { label: 'Greeting', text: 'Hi! 👋\n\nHow can we help you today?' },
+  { label: 'Need info', text: 'Could you please provide:\n- What happened?\n- When did it start?\n- Any screenshots/errors?\n\nThanks!' },
+  { label: 'Working on it', text: 'Thanks — we are looking into this now. We will get back to you shortly.' },
+  { label: 'Resolved', text: 'This should be resolved now. If the issue returns, reply here and we will continue.' },
+];
+
+function fillCanned() {
+  const sel = document.getElementById('t-canned');
+  if (!sel) return;
+  sel.innerHTML = `<option value="">Canned reply…</option>` + CANNED_REPLIES.map((c, i) => `<option value="${i}">${esc(c.label)}</option>`).join('');
+}
+function insertCanned(v) {
+  const sel = document.getElementById('t-canned');
+  const idx = parseInt(v);
+  if (!Number.isFinite(idx) || !CANNED_REPLIES[idx]) { if (sel) sel.value = ''; return; }
+  const input = document.getElementById('t-reply-input');
+  if (!input) return;
+  const t = CANNED_REPLIES[idx].text;
+  input.value = (input.value && !input.value.endsWith('\n') ? input.value + '\n\n' : input.value) + t;
+  input.dispatchEvent(new Event('input'));
+  input.focus();
+  if (sel) sel.value = '';
+}
 
 // ─── Server helpers ───────────────────────────────────────────────────────────
 function currentServer() { return SERVERS[CURRENT] || null; }
@@ -661,6 +1090,73 @@ function api(path, opts={}) {
     headers: { 'Authorization':'Bearer '+srv.token, 'Content-Type':'application/json', ...opts.headers },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   }).then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.error||r.statusText) }));
+}
+
+async function openTranscript(id) {
+  const srv = currentServer();
+  if (!srv) { toast('No server selected — go to Settings', 'err'); return; }
+  try {
+    const res = await fetch(srv.url + `/api/tickets/${id}/transcript`, {
+      headers: { 'Authorization': 'Bearer ' + srv.token },
+    });
+    if (!res.ok) {
+      let msg = res.statusText || 'Failed to load transcript';
+      try { const j = await res.json(); msg = j.error || msg; } catch {}
+      throw new Error(msg);
+    }
+    const html = await res.text();
+    const w = window.open('', '_blank');
+    if (!w) { toast('Popup blocked — allow popups and try again', 'err'); return; }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+async function openTranscriptTxt(id) {
+  const srv = currentServer();
+  if (!srv) { toast('No server selected — go to Settings', 'err'); return; }
+  try {
+    const res = await fetch(srv.url + `/api/tickets/${id}/transcript.txt`, {
+      headers: { 'Authorization': 'Bearer ' + srv.token },
+    });
+    if (!res.ok) {
+      let msg = res.statusText || 'Failed to load transcript';
+      try { const j = await res.json(); msg = j.error || msg; } catch {}
+      throw new Error(msg);
+    }
+    const text = await res.text();
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `ticket-${id.slice(0,8)}.txt` });
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+async function openTranscriptJson(id) {
+  const srv = currentServer();
+  if (!srv) { toast('No server selected — go to Settings', 'err'); return; }
+  try {
+    const res = await fetch(srv.url + `/api/tickets/${id}/transcript.json`, {
+      headers: { 'Authorization': 'Bearer ' + srv.token },
+    });
+    if (!res.ok) {
+      let msg = res.statusText || 'Failed to load transcript';
+      try { const j = await res.json(); msg = j.error || msg; } catch {}
+      throw new Error(msg);
+    }
+    const json = await res.json();
+    const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json;charset=utf-8' });
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `ticket-${id.slice(0,8)}.json` });
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (e) {
+    toast(e.message, 'err');
+  }
 }
 
 // ─── Guild switcher ───────────────────────────────────────────────────────────
@@ -1017,10 +1513,13 @@ let _chatPoller = null;
 async function openTicket(id){
   _currentTicketId = id;
   document.getElementById('t-overlay').classList.add('open');
-  document.getElementById('t-messages').innerHTML='<p style="color:var(--text3);text-align:center;padding:30px">Loading…</p>';
-  document.getElementById('t-infobar').innerHTML='';
+  document.getElementById('t-messages').innerHTML='<div class="t-empty-state"><div class="t-es-icon">💬</div><p>Loading conversation…</p></div>';
+  document.getElementById('t-infobar').innerHTML='<div class="t-meta-label">Ticket Details</div><div class="t-meta-row" style="color:var(--text3);font-size:12px">Loading…</div>';
   document.getElementById('t-mfoot').innerHTML='';
   document.getElementById('t-replybox').style.display='none';
+  document.getElementById('t-mtitle').textContent='Ticket';
+  document.getElementById('t-head-sub').textContent='Loading…';
+  document.getElementById('t-status-badge').innerHTML='';
 
   await refreshTicketChat(id);
 
@@ -1037,65 +1536,139 @@ async function refreshTicketChat(id, silent=false){
 
     // Title & status
     document.getElementById('t-mtitle').textContent = `Ticket #${t.ticket_number||'?'} — ${t.category||t.type||'?'}`;
+    document.getElementById('t-head-sub').textContent = `${t.user_tag||t.created_by||'?'} · ${fd(t.opened_at)}`;
     document.getElementById('t-status-badge').innerHTML = `<span class="badge ${t.status}">${t.status}</span>`;
 
-    // Info bar
+    const now = Date.now();
+    const openedAtMs = t.opened_at ? new Date(t.opened_at).getTime() : null;
+    const messages = Array.isArray(msgs) ? msgs : (msgs.messages||[]);
+    const lastMsg = messages.length ? messages[messages.length - 1] : null;
+    const lastMsgMs = lastMsg?.sent_at ? new Date(lastMsg.sent_at).getTime() : null;
+    const ageMs = openedAtMs ? (now - openedAtMs) : null;
+    const lastMs = lastMsgMs ? (now - lastMsgMs) : null;
+
+    // ── Sidebar metadata ──
+    const priorityColors = { low:'var(--green)', normal:'var(--text2)', urgent:'var(--red)' };
+    const ageColor  = ageMs != null && ageMs > 24*60*60*1000 ? 'var(--red)' : 'var(--text2)';
+    const lastColor = lastMs != null && lastMs > 2*60*60*1000 ? 'var(--yellow)' : 'var(--text2)';
     document.getElementById('t-infobar').innerHTML = `
-      <span><b style="color:var(--text2)">User</b> &nbsp;${esc(t.user_tag||t.created_by||'?')}</span>
-      <span><b style="color:var(--text2)">Priority</b> &nbsp;<span class="pdot ${t.priority}"></span>${t.priority||'normal'}</span>
-      <span><b style="color:var(--text2)">Claimed</b> &nbsp;${t.claimed_by_tag||'—'}</span>
-      <span><b style="color:var(--text2)">Opened</b> &nbsp;${fd(t.opened_at)}</span>
-      ${t.rating?`<span><b style="color:var(--text2)">Rating</b> &nbsp;${mkStars(t.rating)}</span>`:''}
-      ${t.close_reason?`<span><b style="color:var(--text2)">Reason</b> &nbsp;${esc(t.close_reason)}</span>`:''}
+      <div class="t-meta-label">Ticket Details</div>
+      <div class="t-meta-row">
+        <div class="t-meta-item">
+          <div class="t-meta-key">User</div>
+          <div class="t-meta-val">${esc(t.user_tag||t.created_by||'?')}</div>
+        </div>
+        <div class="t-meta-item">
+          <div class="t-meta-key">Category</div>
+          <div class="t-meta-val">${esc(t.category||t.type||'?')}</div>
+        </div>
+        <div class="t-meta-item">
+          <div class="t-meta-key">Priority</div>
+          <div class="t-meta-val" style="color:${priorityColors[t.priority]||'var(--text2)'}">
+            <span class="pdot ${t.priority}"></span>${t.priority||'normal'}
+          </div>
+        </div>
+        <div class="t-meta-item">
+          <div class="t-meta-key">Status</div>
+          <div class="t-meta-val">${t.status||'—'}</div>
+        </div>
+        <div class="t-meta-item">
+          <div class="t-meta-key">Claimed by</div>
+          <div class="t-meta-val">${esc(t.claimed_by_tag||'—')}</div>
+        </div>
+        <div class="t-meta-item">
+          <div class="t-meta-key">Opened</div>
+          <div class="t-meta-val mono">${fd(t.opened_at)}</div>
+        </div>
+        <div class="t-meta-item">
+          <div class="t-meta-key">Age</div>
+          <div class="t-meta-val mono" style="color:${ageColor}">${ageMs==null?'—':humanMs(ageMs)}</div>
+        </div>
+        <div class="t-meta-item">
+          <div class="t-meta-key">Last msg</div>
+          <div class="t-meta-val mono" style="color:${lastColor}">${lastMs==null?'—':humanMs(lastMs)}</div>
+        </div>
+        ${t.rating ? `<div class="t-meta-item"><div class="t-meta-key">Rating</div><div class="t-meta-val">${mkStars(t.rating)}</div></div>` : ''}
+        ${t.close_reason ? `<div class="t-meta-item"><div class="t-meta-key">Close Reason</div><div class="t-meta-val">${esc(t.close_reason)}</div></div>` : ''}
+      </div>
     `;
 
-    // Messages
+    // ── Messages ──
     const msgBox = document.getElementById('t-messages');
     const wasAtBottom = msgBox.scrollHeight - msgBox.scrollTop - msgBox.clientHeight < 60;
 
-    const messages = Array.isArray(msgs) ? msgs : (msgs.messages||[]);
-
     if (!messages.length) {
-      msgBox.innerHTML = '<p style="color:var(--text3);text-align:center;padding:40px;font-size:13px">No messages yet — conversation will appear here as users chat in Discord.</p>';
+      msgBox.innerHTML = `<div class="t-empty-state"><div class="t-es-icon">💬</div><p>No messages yet — conversation will appear here as users chat in Discord.</p></div>`;
     } else {
-      msgBox.innerHTML = messages.map(m => {
+      // Group consecutive messages by same author
+      let html = '';
+      let lastDate = null;
+      messages.forEach((m, i) => {
         const isStaff = m.is_staff;
         const isPending = m.discord_msg_id === 'pending';
-        return `<div style="display:flex;gap:10px;align-items:flex-start;${isStaff?'flex-direction:row-reverse':''}">
-          ${m.avatar_url ? `<img src="${m.avatar_url}" style="width:32px;height:32px;border-radius:50%;flex-shrink:0;margin-top:2px" onerror="this.style.display='none'">` : `<div style="width:32px;height:32px;border-radius:50%;background:${isStaff?'var(--accent)':'var(--surface2)'};flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700">${esc((m.author_tag||'?')[0].toUpperCase())}</div>`}
-          <div style="max-width:75%">
-            <div style="font-size:11px;color:var(--text3);margin-bottom:3px;${isStaff?'text-align:right':''}">
-              <b style="color:${isStaff?'var(--accent2)':'var(--text2)'}">${esc(m.author_tag||'?')}</b>
-              &nbsp;${fd(m.sent_at)}
-              ${isPending?'&nbsp;<span style="color:var(--text3);font-style:italic">sending…</span>':''}
+        const authorInitial = (m.author_tag||'?')[0].toUpperCase();
+        const msgDate = m.sent_at ? new Date(m.sent_at).toLocaleDateString() : null;
+        let attachments = [];
+        try { if (m.attachments) attachments = JSON.parse(m.attachments); } catch {}
+        const attHtml = attachments.map(a => {
+          const url = escAttr(a?.url || '');
+          if (!url) return '';
+          const name = esc(a?.name || 'file');
+          const isImg = /\.(png|jpe?g|gif|webp)$/i.test(a?.name || '') || String(a?.type || '').startsWith('image/');
+          if (isImg) return `<a href="${url}" target="_blank" rel="noopener"><img class="tm-att-img" src="${url}" loading="lazy"></a>`;
+          return `<a class="tm-att-file" href="${url}" target="_blank" rel="noopener">📎 ${name}</a>`;
+        }).filter(Boolean).join('');
+        const attsBlock = attHtml ? `<div class="tm-atts">${attHtml}</div>` : '';
+
+        // Day separator
+        if (msgDate && msgDate !== lastDate) {
+          lastDate = msgDate;
+          const label = msgDate === new Date().toLocaleDateString() ? 'Today' : msgDate;
+          html += `<div class="t-day-sep">${label}</div>`;
+        }
+
+        const avatarHtml = m.avatar_url
+          ? `<div class="tm-ava ${isStaff?'staff-ava':'user-ava'}"><img src="${m.avatar_url}" onerror="this.parentElement.textContent='${authorInitial}'"></div>`
+          : `<div class="tm-ava ${isStaff?'staff-ava':'user-ava'}">${authorInitial}</div>`;
+
+        html += `<div class="tm-group ${isStaff?'tm-staff':'tm-user'}">
+          ${avatarHtml}
+          <div class="tm-content">
+            <div class="tm-meta">
+              <span class="tm-author">${esc(m.author_tag||'?')}</span>
+              <span class="tm-time">${fd(m.sent_at)}</span>
             </div>
-            <div style="background:${isStaff?'linear-gradient(135deg,var(--accent),#7c3aed)':'var(--surface2)'};color:${isStaff?'#fff':'var(--text)'};padding:10px 14px;border-radius:${isStaff?'14px 4px 14px 14px':'4px 14px 14px 14px'};font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-word">${esc(m.content||'')}</div>
+            <div class="tm-bubble">${esc(m.content||'')}${attsBlock}</div>
+            ${isPending ? `<div class="tm-pending">Sending to Discord…</div>` : ''}
           </div>
         </div>`;
-      }).join('');
+      });
+      msgBox.innerHTML = html;
     }
 
-    // Auto scroll to bottom if was at bottom
     if (wasAtBottom || !silent) {
       setTimeout(() => { msgBox.scrollTop = msgBox.scrollHeight; }, 50);
     }
 
-    // Footer
+    // ── Action buttons in sidebar ──
     const isOpen = t.status === 'open' || t.status === 'Öppen';
     document.getElementById('t-mfoot').innerHTML = `
-      <button class="btn sm" onclick="addNote('${id}')">+ Note</button>
-      <button class="btn sm success" onclick="claimTk('${id}')">✋ Claim</button>
+      <button class="t-action-btn" onclick="openTranscript('${id}')">📄 Transcript</button>
+      <button class="t-action-btn" onclick="openTranscriptTxt('${id}')">🧾 Transcript .txt</button>
+      <button class="t-action-btn" onclick="openTranscriptJson('${id}')">🧩 Transcript .json</button>
+      <button class="t-action-btn" onclick="addNote('${id}')">📝 Add Note</button>
+      <button class="t-action-btn success" onclick="claimTk('${id}')">✋ Claim Ticket</button>
+      <button class="t-action-btn primary" onclick="setPriority('${id}')">⚡ Set Priority</button>
       ${isOpen
-        ? `<button class="btn sm danger" onclick="closeTk('${id}')">🔒 Close</button>`
-        : `<button class="btn sm primary" onclick="reopenTk('${id}')">↩ Re-open</button>`
+        ? `<button class="t-action-btn danger" onclick="closeTk('${id}')">🔒 Close Ticket</button>`
+        : `<button class="t-action-btn primary" onclick="reopenTk('${id}')">↩ Re-open Ticket</button>`
       }
     `;
 
-    // Show reply box only for open tickets
     document.getElementById('t-replybox').style.display = isOpen ? 'block' : 'none';
 
   } catch(e) {
-    if (!silent) document.getElementById('t-messages').innerHTML = `<p style="color:var(--red);padding:20px">${e.message}</p>`;
+    if (!silent) document.getElementById('t-messages').innerHTML = `<div class="t-empty-state"><div class="t-es-icon">⚠️</div><p style="color:var(--red)">${e.message}</p></div>`;
   }
 }
 
@@ -1104,8 +1677,8 @@ async function sendReply(){
   const message = input.value.trim();
   if (!message || !_currentTicketId) return;
 
-  const btn = document.querySelector('#t-replybox button');
-  btn.disabled = true; btn.textContent = 'Sending…';
+  const btn = document.querySelector('#t-replybox .t-send-btn');
+  btn.disabled = true; btn.textContent = '…';
 
   try {
     await api(`/api/tickets/${_currentTicketId}/reply`, { method:'POST', body:{ message } });
@@ -1114,7 +1687,7 @@ async function sendReply(){
   } catch(e) {
     alert('Failed to send: ' + e.message);
   } finally {
-    btn.disabled = false; btn.textContent = 'Send ↑';
+    btn.disabled = false; btn.textContent = '↑';
     input.focus();
   }
 }
@@ -1132,6 +1705,12 @@ async function claimTk(id){ try{ await api(`/api/tickets/${id}/claim`,{method:'P
 async function closeTk(id){ const r=prompt('Close reason:')||''; try{ await api(`/api/tickets/${id}/close`,{method:'POST',body:{reason:r||'Closed via panel'}}); toast('Closed','ok'); closeTMD(); loadTickets(); }catch(e){ toast(e.message,'err'); } }
 async function reopenTk(id){ try{ await api(`/api/tickets/${id}`,{method:'PATCH',body:{status:'open'}}); toast('Re-opened','ok'); openTicket(id); loadTickets(); }catch(e){ toast(e.message,'err'); } }
 async function addNote(id){ const n=prompt('Internal note:'); if(!n) return; try{ await api(`/api/tickets/${id}/note`,{method:'POST',body:{note:n}}); toast('Note added','ok'); openTicket(id); }catch(e){ toast(e.message,'err'); } }
+async function setPriority(id){
+  const p = (prompt('Priority (low / normal / urgent):','normal')||'').trim().toLowerCase();
+  if (!p) return;
+  if (!['low','normal','urgent'].includes(p)) { toast('Invalid priority','err'); return; }
+  try{ await api(`/api/tickets/${id}`,{method:'PATCH',body:{priority:p}}); toast('Priority updated','ok'); openTicket(id); loadTickets(); }catch(e){ toast(e.message,'err'); }
+}
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 async function doExport(type){
@@ -1194,14 +1773,27 @@ function globalSearch(q){
 // ─── Utils ────────────────────────────────────────────────────────────────────
 function fd(d){ if(!d) return '—'; return new Date(d).toLocaleString('sv-SE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}); }
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escAttr(s){ return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function hilite(s,q){ return s.replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi'),'<span class="hl">$1</span>'); }
 function mkStars(n){ return `<span class="stars">${[1,2,3,4,5].map(i=>`<span class="star ${i<=n?'on':''}">★</span>`).join('')}</span>`; }
 function dur(t){ if(!t.closed_at) return 'Open'; const m=Math.floor((new Date(t.closed_at)-new Date(t.opened_at))/60000); return m<60?m+'m':m<1440?Math.floor(m/60)+'h':Math.floor(m/1440)+'d'; }
+function humanMs(ms){
+  if (ms < 0) ms = 0;
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  const d = Math.floor(h / 24);
+  if (d > 0) return `${d}d ${h%24}h`;
+  if (h > 0) return `${h}h ${m%60}m`;
+  if (m > 0) return `${m}m`;
+  return `${s}s`;
+}
 function toast(msg,type='ok'){ const el=document.createElement('div'); el.className=`toast ${type}`; el.textContent=({'ok':'✓','err':'✕','info':'ℹ'}[type]||'•')+'  '+msg; document.getElementById('toasts').appendChild(el); setTimeout(()=>el.remove(),3000); }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 async function loadAll(){
   updateGuildDisplay();
+  fillCanned();
   await loadTickets();
   loadCategories();
   try{

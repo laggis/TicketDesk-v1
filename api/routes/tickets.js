@@ -2,6 +2,42 @@ const express = require('express');
 const router  = express.Router();
 const pool    = require('../../db/pool');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { rateLimit } = require('../middleware/rateLimit');
+
+function escHtml(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function redact(s) {
+  const str = String(s || '');
+  return str
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[redacted-email]')
+    .replace(/\b\d{3,4}[-.\s]?\d{2,3}[-.\s]?\d{2,3}[-.\s]?\d{2,3}\b/g, '[redacted-number]')
+    .replace(/\b(eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,})\b/g, '[redacted-jwt]')
+    .replace(/\b([a-zA-Z0-9_-]{24,})\b/g, m => (m.length >= 40 ? '[redacted-token]' : m));
+}
+
+async function audit(req, { action, ticketId = null, details = null } = {}) {
+  try {
+    await pool.query(
+      'INSERT INTO admin_audit_logs (staff_id, staff_tag, action, ticket_id, ip, user_agent, details) VALUES (?,?,?,?,?,?,?)',
+      [
+        req.user?.discord_id || req.user?.id?.toString() || null,
+        req.user?.discord_tag || req.user?.username || null,
+        action || null,
+        ticketId,
+        req.headers['x-forwarded-for']?.toString()?.split(',')?.[0]?.trim() || req.ip,
+        (req.headers['user-agent'] || '').toString().slice(0, 500),
+        details ? JSON.stringify(details) : null,
+      ]
+    );
+  } catch {}
+}
 
 // ─── GET /api/tickets ─────────────────────────────────────────────────────────
 // Filterable, paginated ticket list
@@ -107,6 +143,7 @@ router.patch('/:id', authenticateToken, async (req, res, next) => {
       'INSERT INTO ticket_logs (ticket_id, staff_id, staff_tag, action, details) VALUES (?,?,?,?,?)',
       [req.params.id, req.user.discord_id, req.user.discord_tag, 'update', JSON.stringify(req.body)]
     );
+    await audit(req, { action: 'ticket_update', ticketId: req.params.id, details: req.body });
 
     const [[ticket]] = await pool.query('SELECT * FROM tickets WHERE id = ?', [req.params.id]);
     res.json(ticket);
@@ -129,6 +166,7 @@ router.post('/:id/close', authenticateToken, async (req, res, next) => {
       'INSERT INTO ticket_logs (ticket_id, staff_id, staff_tag, action, details) VALUES (?,?,?,?,?)',
       [req.params.id, req.user.discord_id || '0', req.user.discord_tag || req.user.username, 'close', reason || 'Closed via panel']
     ).catch(() => {});
+    await audit(req, { action: 'ticket_close', ticketId: req.params.id, details: { reason } });
 
     res.json({ ok: true, message: 'Close request sent to bot' });
   } catch (err) { next(err); }
@@ -145,6 +183,7 @@ router.post('/:id/claim', authenticateToken, async (req, res, next) => {
       'INSERT INTO ticket_logs (ticket_id, staff_id, staff_tag, action) VALUES (?,?,?,?)',
       [req.params.id, req.user.discord_id, req.user.discord_tag, 'claim']
     );
+    await audit(req, { action: 'ticket_claim', ticketId: req.params.id });
     res.json({ ok: true });
   } catch (err) { next(err); }
 });
@@ -163,7 +202,7 @@ router.post('/:id/note', authenticateToken, async (req, res, next) => {
 });
 
 // ─── GET /api/tickets/:id/transcript ─────────────────────────────────────────
-router.get('/:id/transcript', authenticateToken, async (req, res, next) => {
+router.get('/:id/transcript', authenticateToken, rateLimit({ windowMs: 60_000, max: 120, message: 'Too many transcript requests' }), async (req, res, next) => {
   try {
     const [[ticket]]  = await pool.query('SELECT * FROM tickets WHERE id = ?', [req.params.id]);
     if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
@@ -171,6 +210,7 @@ router.get('/:id/transcript', authenticateToken, async (req, res, next) => {
       'SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY sent_at ASC',
       [req.params.id]
     );
+    const shouldRedact = req.query.redact === '1' || req.query.redact === 'true';
 
     const html = `<!DOCTYPE html>
 <html><head><meta charset="UTF-8">
@@ -184,27 +224,73 @@ h1{font-size:18px;border-bottom:1px solid #333;padding-bottom:12px}
 .author{font-weight:700;font-size:11px;margin-bottom:4px}
 .msg.staff .author{color:#5865f2}.msg.user .author{color:#3ba55d}
 .time{font-size:10px;color:#666;margin-left:8px}
+.att{display:block;max-width:100%;border-radius:8px;margin-top:8px;border:1px solid rgba(255,255,255,.08)}
+a{color:#9aa5ff}
 </style></head><body>
 <h1>Ticket #${ticket.ticket_number} — ${ticket.category}</h1>
-<div class="meta">User: ${ticket.user_tag} | Status: ${ticket.status} | Opened: ${ticket.opened_at}</div>
+<div class="meta">User: ${escHtml(shouldRedact ? redact(ticket.user_tag) : ticket.user_tag)} | Status: ${escHtml(ticket.status)} | Opened: ${escHtml(ticket.opened_at)}</div>
 ${messages.map(m => {
   let attachments = [];
   try { if (m.attachments) attachments = JSON.parse(m.attachments); } catch {}
   const atts = attachments.map(a =>
     /\.(png|jpe?g|gif|webp)$/i.test(a.name || '') || (a.type || '').startsWith('image/')
-      ? `<img class="att" src="${a.url}">`
-      : `<a href="${a.url}">${a.name || 'file'}</a>`
+      ? `<a href="${escHtml(a.url)}"><img class="att" src="${escHtml(a.url)}"></a>`
+      : `<a href="${escHtml(a.url)}">${escHtml(a.name || 'file')}</a>`
   ).join('');
+  const content = shouldRedact ? redact(m.content || '') : (m.content || '');
   return `
 <div class="msg ${m.is_staff ? 'staff' : 'user'}">
-  <div class="author">${m.author_tag} <span class="time">${m.sent_at}</span></div>
-  <div>${m.content || ''}</div>${atts}
+  <div class="author">${escHtml(shouldRedact ? redact(m.author_tag) : m.author_tag)} <span class="time">${escHtml(m.sent_at)}</span></div>
+  <div>${escHtml(content)}</div>${atts}
 </div>`;
 }).join('')}
 </body></html>`;
 
     res.setHeader('Content-Type', 'text/html');
     res.send(html);
+  } catch (err) { next(err); }
+});
+
+router.get('/:id/transcript.txt', authenticateToken, rateLimit({ windowMs: 60_000, max: 120, message: 'Too many transcript requests' }), async (req, res, next) => {
+  try {
+    const [[ticket]]  = await pool.query('SELECT * FROM tickets WHERE id = ?', [req.params.id]);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+    const [messages] = await pool.query(
+      'SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY sent_at ASC',
+      [req.params.id]
+    );
+    const shouldRedact = req.query.redact === '1' || req.query.redact === 'true';
+    const header = `Ticket #${ticket.ticket_number} (${ticket.category})\nUser: ${ticket.user_tag}\nStatus: ${ticket.status}\nOpened: ${ticket.opened_at}\n\n`;
+    const body = messages.map(m => {
+      const author = shouldRedact ? redact(m.author_tag) : m.author_tag;
+      const time = m.sent_at;
+      const content = shouldRedact ? redact(m.content || '') : (m.content || '');
+      let attachments = [];
+      try { if (m.attachments) attachments = JSON.parse(m.attachments); } catch {}
+      const atts = attachments.map(a => (a?.url ? `  - ${a.name || 'file'}: ${a.url}` : '')).filter(Boolean).join('\n');
+      return `[${time}] ${author}\n${content}${atts ? `\n${atts}` : ''}\n`;
+    }).join('\n');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.send(header + body);
+  } catch (err) { next(err); }
+});
+
+router.get('/:id/transcript.json', authenticateToken, rateLimit({ windowMs: 60_000, max: 120, message: 'Too many transcript requests' }), async (req, res, next) => {
+  try {
+    const [[ticket]]  = await pool.query('SELECT * FROM tickets WHERE id = ?', [req.params.id]);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+    const [messages] = await pool.query(
+      'SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY sent_at ASC',
+      [req.params.id]
+    );
+    const shouldRedact = req.query.redact === '1' || req.query.redact === 'true';
+    const safeTicket = shouldRedact
+      ? { ...ticket, user_tag: redact(ticket.user_tag), description: redact(ticket.description || ''), subject: redact(ticket.subject || '') }
+      : ticket;
+    const safeMessages = shouldRedact
+      ? messages.map(m => ({ ...m, author_tag: redact(m.author_tag), content: redact(m.content || '') }))
+      : messages;
+    res.json({ ticket: safeTicket, messages: safeMessages });
   } catch (err) { next(err); }
 });
 
@@ -232,7 +318,7 @@ router.get('/user/:discord_id', authenticateToken, async (req, res, next) => {
 
 // ─── POST /api/tickets/:id/reply ──────────────────────────────────────────────
 // Panel staff sends a message → saved to DB → bot picks it up and posts to Discord
-router.post('/:id/reply', authenticateToken, async (req, res, next) => {
+router.post('/:id/reply', authenticateToken, rateLimit({ windowMs: 60_000, max: 60, message: 'Too many replies' }), async (req, res, next) => {
   try {
     const { message, image_urls } = req.body;
     if ((!message || !message.trim()) && (!image_urls || !image_urls.length))
@@ -246,7 +332,9 @@ router.post('/:id/reply', authenticateToken, async (req, res, next) => {
     }
 
     // Build attachments JSON for image URLs pasted/uploaded via panel
-    const attachments = (image_urls || []).map(url => ({ url, name: url.split('/').pop() || 'image', type: 'image/unknown' }));
+    const urls = Array.isArray(image_urls) ? image_urls : [];
+    if (urls.length > 5) return res.status(400).json({ error: 'Too many images (max 5)' });
+    const attachments = urls.map(url => ({ url, name: url.split('/').pop() || 'image', type: 'image/unknown' }));
 
     // Save message to DB with pending_discord flag
     await pool.query(
@@ -256,6 +344,7 @@ router.post('/:id/reply', authenticateToken, async (req, res, next) => {
       [req.params.id, req.user.id?.toString() || '0', req.user.username || req.user.discord_tag,
        (message || '').trim(), attachments.length ? JSON.stringify(attachments) : null]
     );
+    await audit(req, { action: 'ticket_reply', ticketId: req.params.id, details: { has_text: !!(message || '').trim(), image_count: attachments.length } });
 
     res.json({ ok: true });
   } catch (err) { next(err); }
@@ -264,11 +353,20 @@ router.post('/:id/reply', authenticateToken, async (req, res, next) => {
 // ─── GET /api/tickets/:id/messages ────────────────────────────────────────────
 router.get('/:id/messages', authenticateToken, async (req, res, next) => {
   try {
-    const [messages] = await pool.query(
-      'SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY sent_at ASC',
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit || '200')));
+    const order = (String(req.query.order || 'ASC').toUpperCase() === 'DESC') ? 'DESC' : 'ASC';
+    const page = Math.max(1, parseInt(req.query.page || '1'));
+    const offset = (page - 1) * limit;
+
+    const [[{ total }]] = await pool.query(
+      'SELECT COUNT(*) as total FROM ticket_messages WHERE ticket_id = ?',
       [req.params.id]
     );
-    res.json(messages);
+    const [messages] = await pool.query(
+      `SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY sent_at ${order} LIMIT ? OFFSET ?`,
+      [req.params.id, limit, offset]
+    );
+    res.json({ data: messages, pagination: { page, limit, total, total_pages: Math.ceil(total / limit) } });
   } catch (err) { next(err); }
 });
 

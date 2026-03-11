@@ -6,6 +6,28 @@ const pool     = require('../../db/pool');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 require('dotenv').config();
 
+function getJwtSecrets() {
+  const multi = (process.env.JWT_SECRETS || '').split(',').map(s => s.trim()).filter(Boolean);
+  const single = (process.env.JWT_SECRET || '').trim();
+  return multi.length ? multi : (single ? [single] : []);
+}
+
+async function audit(req, { action, staffId = null, staffTag = null, details = null } = {}) {
+  try {
+    await pool.query(
+      'INSERT INTO admin_audit_logs (staff_id, staff_tag, action, ip, user_agent, details) VALUES (?,?,?,?,?,?)',
+      [
+        staffId,
+        staffTag,
+        action || null,
+        req.headers['x-forwarded-for']?.toString()?.split(',')?.[0]?.trim() || req.ip,
+        (req.headers['user-agent'] || '').toString().slice(0, 500),
+        details ? JSON.stringify(details) : null,
+      ]
+    );
+  } catch {}
+}
+
 // ── GET /api/login/has-admins ─── public, used by login page ─────────────────
 router.get('/has-admins', async (req, res) => {
   try {
@@ -21,18 +43,28 @@ router.post('/', async (req, res) => {
     if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
 
     const [[user]] = await pool.query('SELECT * FROM admin_users WHERE username = ?', [username.toLowerCase().trim()]);
-    if (!user) return res.status(401).json({ error: 'Invalid username or password' });
+    if (!user) {
+      await audit(req, { action: 'login_failed', details: { username: username.toLowerCase().trim(), reason: 'no_user' } });
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
 
     const valid = await bcrypt.compare(password, user.password_hash);
-    if (!valid) return res.status(401).json({ error: 'Invalid username or password' });
+    if (!valid) {
+      await audit(req, { action: 'login_failed', staffId: user.id.toString(), staffTag: user.discord_tag || user.username, details: { reason: 'bad_password' } });
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
 
     await pool.query('UPDATE admin_users SET last_login = NOW() WHERE id = ?', [user.id]);
 
+    const secrets = getJwtSecrets();
+    if (!secrets.length) return res.status(500).json({ error: 'JWT secret not configured' });
+    const expiresIn = (process.env.JWT_EXPIRES_IN || '30d').trim();
     const token = jwt.sign(
       { id: user.id, username: user.username, discord_tag: user.discord_tag || user.username, discord_id: user.id.toString(), role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: '30d' }
+      secrets[0],
+      { expiresIn }
     );
+    await audit(req, { action: 'login_success', staffId: user.id.toString(), staffTag: user.discord_tag || user.username });
     res.json({ token, user: { username: user.username, role: user.role, discord_tag: user.discord_tag } });
   } catch (err) {
     res.status(500).json({ error: 'Login failed: ' + err.message });
@@ -62,6 +94,7 @@ router.post('/setup', async (req, res) => {
       [username.toLowerCase().trim(), hash, discord_tag || username]
     );
     console.log(`[Login] First admin created: ${username}`);
+    await audit(req, { action: 'setup_first_admin', details: { username: username.toLowerCase().trim() } });
     res.json({ ok: true, message: `Admin account "${username}" created!` });
   } catch (err) {
     res.status(500).json({ error: 'Setup failed: ' + err.message });
@@ -100,6 +133,7 @@ router.post('/users', authenticateToken, requireAdmin, async (req, res) => {
       [username.toLowerCase().trim(), hash, discord_tag || username, role]
     );
     console.log(`[Login] New ${role} created by ${req.user.username}: ${username}`);
+    await audit(req, { action: 'panel_user_create', staffId: req.user.id.toString(), staffTag: req.user.discord_tag || req.user.username, details: { username: username.toLowerCase().trim(), role } });
     res.json({ ok: true, message: `Account "${username}" created as ${role}` });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -113,6 +147,7 @@ router.delete('/users/:id', authenticateToken, requireAdmin, async (req, res) =>
       return res.status(400).json({ error: "You can't delete your own account" });
     }
     await pool.query('DELETE FROM admin_users WHERE id = ?', [req.params.id]);
+    await audit(req, { action: 'panel_user_delete', staffId: req.user.id.toString(), staffTag: req.user.discord_tag || req.user.username, details: { deleted_id: req.params.id } });
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -126,6 +161,7 @@ router.patch('/users/:id', authenticateToken, requireAdmin, async (req, res) => 
     if (!['admin','staff'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
     if (parseInt(req.params.id) === req.user.id) return res.status(400).json({ error: "Can't change your own role" });
     await pool.query('UPDATE admin_users SET role = ? WHERE id = ?', [role, req.params.id]);
+    await audit(req, { action: 'panel_user_role', staffId: req.user.id.toString(), staffTag: req.user.discord_tag || req.user.username, details: { target_id: req.params.id, role } });
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -147,6 +183,7 @@ router.post('/change-password', authenticateToken, async (req, res) => {
 
     const hash = await bcrypt.hash(new_password, 12);
     await pool.query('UPDATE admin_users SET password_hash = ? WHERE id = ?', [hash, user.id]);
+    await audit(req, { action: 'password_change', staffId: req.user.id.toString(), staffTag: req.user.discord_tag || req.user.username });
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

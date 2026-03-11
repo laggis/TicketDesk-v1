@@ -74,6 +74,18 @@ async function setup() {
     created_at    DATETIME     DEFAULT CURRENT_TIMESTAMP
   ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
 
+  await db(`CREATE TABLE IF NOT EXISTS admin_audit_logs (
+    id           INT          AUTO_INCREMENT PRIMARY KEY,
+    staff_id     VARCHAR(20)  DEFAULT NULL,
+    staff_tag    VARCHAR(100) DEFAULT NULL,
+    action       VARCHAR(100) DEFAULT NULL,
+    ticket_id    VARCHAR(36)  DEFAULT NULL,
+    ip           VARCHAR(100) DEFAULT NULL,
+    user_agent   VARCHAR(500) DEFAULT NULL,
+    details      TEXT         DEFAULT NULL,
+    created_at   DATETIME     DEFAULT CURRENT_TIMESTAMP
+  ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+
   await db(`CREATE TABLE IF NOT EXISTS panel_config (
     id          INT          AUTO_INCREMENT PRIMARY KEY,
     user_id     VARCHAR(20)  NOT NULL UNIQUE,
@@ -139,6 +151,12 @@ async function setup() {
     "CREATE INDEX IF NOT EXISTS idx_tickets_pending ON tickets(pending_close)",
     "CREATE INDEX IF NOT EXISTS idx_tickets_user    ON tickets(created_by_id)",
     "CREATE INDEX IF NOT EXISTS idx_msgs_ticket     ON ticket_messages(ticket_id)",
+    "CREATE INDEX IF NOT EXISTS idx_tickets_user_status ON tickets(created_by_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_tickets_status_opened ON tickets(status, opened_at)",
+    "CREATE INDEX IF NOT EXISTS idx_msgs_ticket_sent ON ticket_messages(ticket_id, sent_at)",
+    "CREATE INDEX IF NOT EXISTS idx_logs_ticket_time ON ticket_logs(ticket_id, performed_at)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_time ON admin_audit_logs(created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_staff ON admin_audit_logs(staff_id, created_at)",
   ];
   for (const i of indexes) {
     await db(i).catch(() => {});

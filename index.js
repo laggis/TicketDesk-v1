@@ -29,7 +29,31 @@ async function main() {
   const app = await startAPI();
 
   // 3. Start Discord bot (passes shared db + app so bot can push events)
-  await startBot(app);
+  const botClient = await startBot(app);
+
+  const cleanupDays = parseInt(process.env.CLEANUP_DAYS || '0');
+  async function cleanup() {
+    if (!cleanupDays || cleanupDays < 1) return;
+    await db(
+      "UPDATE tickets SET status='Arkiverad' WHERE (status='Stängd' OR status='closed') AND closed_at IS NOT NULL AND closed_at < (NOW() - INTERVAL ? DAY)",
+      [cleanupDays]
+    ).catch(() => {});
+  }
+  await cleanup();
+  setInterval(cleanup, 6 * 60 * 60 * 1000);
+
+  let shuttingDown = false;
+  async function shutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[Shutdown] ${signal}`);
+    try { if (app?.server) await new Promise(r => app.server.close(r)); } catch {}
+    try { if (botClient?.destroy) await botClient.destroy(); } catch {}
+    try { if (db?.pool?.end) await db.pool.end(); } catch {}
+    process.exit(0);
+  }
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 
   console.log('\n✅ TicketDesk fully online!\n');
 }
