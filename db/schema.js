@@ -140,6 +140,7 @@ async function setup() {
     "ALTER TABLE ticket_messages ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(500) DEFAULT NULL",
     "ALTER TABLE ticket_messages ADD COLUMN IF NOT EXISTS attachments TEXT DEFAULT NULL",
     "ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS color VARCHAR(7) DEFAULT '#6366f1'",
+    "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS last_reminder_at DATETIME DEFAULT NULL",
   ];
   for (const m of migrations) {
     await db(m).catch(() => {}); // ignore if column already exists

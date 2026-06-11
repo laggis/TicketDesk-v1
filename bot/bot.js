@@ -21,6 +21,10 @@ const SUPPORT_ROLE_IDS   = (process.env.SUPPORT_ROLE_IDS || '').split(',').map(s
 const SERVER_NAME        = process.env.SERVER_NAME || 'TicketDesk';
 const MAX_OPEN_TICKETS_PER_USER = Math.max(1, parseInt(process.env.MAX_OPEN_TICKETS_PER_USER || '5'));
 
+// Stale ticket reminders — nudge staff if a customer is waiting too long for a reply
+const STALE_TICKET_MINUTES   = Math.max(1, parseInt(process.env.STALE_TICKET_MINUTES || '30'));
+const STALE_REMINDER_COOLDOWN_MINUTES = Math.max(1, parseInt(process.env.STALE_REMINDER_COOLDOWN_MINUTES || '30'));
+
 // Panel state (avoids duplicate on restart)
 const STATE_PATH = path.join(__dirname, '..', 'panel_state.json');
 const loadState  = () => { try { return JSON.parse(fs.readFileSync(STATE_PATH, 'utf8')); } catch { return null; } };
@@ -309,6 +313,68 @@ async function pollPanelReplies() {
   } catch (err) { console.error('[Poll:replies]', err.message); }
 }
 
+async function pollStaleTickets() {
+  try {
+    // Open tickets, along with the most recent message (if any) so we know
+    // who spoke last and how long ago.
+    const rows = await db(`
+      SELECT t.*,
+        (SELECT sent_at  FROM ticket_messages WHERE ticket_id = t.id ORDER BY sent_at DESC, id DESC LIMIT 1) AS last_msg_at,
+        (SELECT is_staff FROM ticket_messages WHERE ticket_id = t.id ORDER BY sent_at DESC, id DESC LIMIT 1) AS last_msg_is_staff
+      FROM tickets t
+      WHERE (t.status = 'Öppen' OR t.status = 'open') AND t.channel_id IS NOT NULL
+    `);
+
+    for (const t of rows) {
+      // If the last message was from staff, the ball is in the customer's
+      // court — nothing to remind anyone about.
+      if (t.last_msg_is_staff === 1) continue;
+
+      // Reference point: last customer message, or ticket creation if no
+      // messages have been logged yet (e.g. first response never sent).
+      const refTime = t.last_msg_at ? new Date(t.last_msg_at) : new Date(t.opened_at);
+      const minutesWaiting = (Date.now() - refTime.getTime()) / 60000;
+      if (minutesWaiting < STALE_TICKET_MINUTES) continue;
+
+      // Don't spam — only re-notify after the cooldown has passed.
+      if (t.last_reminder_at) {
+        const minutesSinceReminder = (Date.now() - new Date(t.last_reminder_at).getTime()) / 60000;
+        if (minutesSinceReminder < STALE_REMINDER_COOLDOWN_MINUTES) continue;
+      }
+
+      const ch = await client.channels.fetch(t.channel_id).catch(() => null);
+      if (!ch) continue;
+
+      const waitedMins  = Math.floor(minutesWaiting);
+      const waitedLabel = waitedMins >= 60
+        ? Math.floor(waitedMins / 60) + 'h ' + (waitedMins % 60) + 'm'
+        : waitedMins + 'm';
+
+      const supportRoles = SUPPORT_ROLE_IDS.map(id => '<@&' + id + '>').join(' ');
+      const embed = new EmbedBuilder()
+        .setTitle('⏰ Väntar på svar')
+        .setDescription('Den här ticketen har väntat på ett svar från staff i **' + waitedLabel + '**. Kunden sitter och väntar — kika in när du har en stund! 🙏')
+        .setColor('#fbbf24')
+        .addFields(
+          { name: 'Ticket', value: t.ticket_number ? '#' + t.ticket_number : t.id.slice(0, 8), inline: true },
+          { name: 'Kund',   value: t.user_tag || t.created_by || '—',                          inline: true },
+          { name: 'Prio',   value: t.priority || 'normal',                                     inline: true },
+        )
+        .setTimestamp();
+
+      await ch.send({ content: supportRoles || undefined, embeds: [embed] }).catch(() => {});
+      await db('UPDATE tickets SET last_reminder_at = NOW() WHERE id = ?', [t.id]).catch(() => {});
+
+      await modLog(ch.guild, {
+        action: 'StaleTicketReminder',
+        channel: ch,
+        ticketId: t.id,
+        reason: 'Ingen svar från staff på ' + waitedLabel,
+      });
+    }
+  } catch (err) { console.error('[Poll:stale]', err.message); }
+}
+
 // ─── Ready ─────────────────────────────────────────────────────────────────────
 client.once('ready', async () => {
   console.log('\n✅ Bot logged in as ' + client.user.tag);
@@ -380,6 +446,7 @@ client.once('ready', async () => {
   // Start pollers
   setInterval(pollCloseRequests, 10000);
   setInterval(pollPanelReplies, 5000);
+  setInterval(pollStaleTickets, 60000);
   console.log('[Bot] Pollers started.');
 });
 
