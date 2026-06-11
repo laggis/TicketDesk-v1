@@ -1078,10 +1078,10 @@ let CURRENT = parseInt(localStorage.getItem('td_current') || '0');
 let PUSH = { enabled: false, lastSeen: new Set(), timer: null };
 const S = { status:'all', page:1, archPage:1, archResults:[] };
 const CANNED_REPLIES = [
-  { label: 'Greeting', text: 'Hi! 👋\n\nHow can we help you today?' },
-  { label: 'Need info', text: 'Could you please provide:\n- What happened?\n- When did it start?\n- Any screenshots/errors?\n\nThanks!' },
-  { label: 'Working on it', text: 'Thanks — we are looking into this now. We will get back to you shortly.' },
-  { label: 'Resolved', text: 'This should be resolved now. If the issue returns, reply here and we will continue.' },
+  { label: 'Hälsning', text: 'Hej! 👋\n\nHur kan vi hjälpa dig idag?' },
+  { label: 'Behöver info', text: 'Skulle du kunna ge oss lite mer info:\n- Vad hände?\n- När började det?\n- Skärmdumpar/felmeddelanden?\n\nTack!' },
+  { label: 'Jobbar på det', text: 'Tack för ditt tålamod — vi tittar på detta nu och återkommer till dig så snart vi kan.' },
+  { label: 'Löst', text: 'Detta bör nu vara löst. Om problemet kvarstår, svara här så hjälper vi dig vidare.' },
 ];
 
 function fillCanned() {
