@@ -23,7 +23,12 @@ Only required fields:
 - `JWT_SECRET` (or `JWT_SECRETS`) — panel login signing secret(s)
 
 ### 3. Database setup
-On startup, TicketDesk will auto-create tables and run safe “add missing columns/indexes” migrations.
+On startup, TicketDesk will auto-create tables and run safe "add missing columns/indexes" migrations.
+
+To seed the FAQ knowledge base:
+```bash
+mysql -u ticketbot -p ticketbot < faq_seed.sql
+```
 
 ### 4. Start
 ```bash
@@ -56,6 +61,7 @@ ticketdesk/
 │       ├── tickets.js
 │       ├── categories.js ← includes auto-create Discord channel
 │       ├── login.js
+│       ├── faq.js        ← FAQ knowledge base CRUD
 │       └── stats.js
 │
 ├── db/
@@ -95,7 +101,40 @@ After any change the Discord panel embed **updates automatically**.
 
 ---
 
-## Stale Ticket Reminders (NEW)
+## AI Features (Groq)
+
+Set `GROQ_API_KEY` in your `.env` to enable all AI features. Requires a free [Groq](https://console.groq.com) account.
+
+### How it works in ticket channels
+When a **non-staff** user sends a message or image in a ticket channel, the AI will:
+- **Text messages** — check the FAQ knowledge base and reply automatically if a relevant answer is found. If nothing matches, it stays silent.
+- **Images** — analyse the image and post a description embed, useful for spotting error messages or game issues.
+
+> ⚠️ **Staff are excluded from AI replies.** If you are testing the bot and have a staff role or Manage Channels permission, the AI will not respond to your messages. Test with an alt account that has no staff roles.
+
+### FAQ Knowledge Base
+Manage FAQ entries from the panel → **Penguin AI → FAQ**. Each entry has a title, content, category, and can be enabled/disabled individually.
+
+To seed the default FAQ entries:
+```bash
+mysql -u ticketbot -p ticketbot < faq_seed.sql
+```
+
+### Extra Channels
+From the panel → **Penguin AI → Extra Channels**, you can add regular Discord channel IDs where the AI should be active outside of tickets. In these channels users trigger a reply by either:
+- **Mentioning the bot** (`@BotName`)
+- **Starting the message with `?`** (e.g. `?kan inte ansluta till servern`)
+
+Images are always analysed automatically in extra channels.
+
+### AI Slash Commands
+| Command | Who | What |
+|---------|-----|------|
+| `/summarise` | Staff | AI summary of the current ticket conversation |
+
+---
+
+## Stale Ticket Reminders
 
 If a customer is left waiting too long for a reply, TicketDesk will gently nudge your staff so nobody falls through the cracks.
 
@@ -108,7 +147,7 @@ How it works:
 
 - Once staff reply, the timer resets — no more pings until the customer is waiting again.
 - To avoid spam, the same ticket won't be pinged again more often than `STALE_REMINDER_COOLDOWN_MINUTES` (default **30**), even if it's still unanswered.
-- Reminders are also written to your `MOD_LOG_CHANNEL_ID` (if configured) as a `StaleTicketReminder` log entry.
+- Reminders are also written to your `MOD_LOG_CHANNEL` (if configured) as a `StaleTicketReminder` log entry.
 
 Tune both values in `.env` to fit your team — e.g. lower `STALE_TICKET_MINUTES` for a faster-paced support team.
 
@@ -123,7 +162,7 @@ Tune both values in `.env` to fit your team — e.g. lower `STALE_TICKET_MINUTES
 | `/add <user>` | Staff | Add a user to the current ticket channel |
 | `/remove <user>` | Staff | Remove a user from the current ticket channel |
 | `/claim` | Staff | Claim the current ticket |
-| `/priority <low|normal|urgent>` | Staff | Set priority on the current ticket |
+| `/priority <low\|normal\|urgent>` | Staff | Set priority on the current ticket |
 | `/ticket ban <user>` | Mods | Ban user from tickets |
 | `/ticket unban <user>` | Mods | Unban user |
 | `/summarise` | Staff | AI summary of current ticket |
@@ -148,7 +187,7 @@ Tune both values in `.env` to fit your team — e.g. lower `STALE_TICKET_MINUTES
 | `JWT_SECRETS` | — | Comma-separated secrets (first is active, rest are accepted) |
 | `JWT_EXPIRES_IN` | — | JWT expiry (default `30d`) |
 | `SERVER_NAME` | — | Shown in embeds (default TicketDesk) |
-| `GROQ_API_KEY` | — | Enables AI features |
+| `GROQ_API_KEY` | — | Enables AI features (get one free at console.groq.com) |
 | `TICKET_DELETE_DELAY_MS` | — | Delete delay after close (default 5000) |
 | `MAX_OPEN_TICKETS_PER_USER` | — | Ticket limit per user (default 5) |
 | `CLEANUP_DAYS` | — | Auto-archive closed tickets older than N days |
