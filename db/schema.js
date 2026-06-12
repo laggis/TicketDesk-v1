@@ -129,6 +129,26 @@ async function setup() {
   await db("ALTER TABLE tickets MODIFY COLUMN ticket_number INT AUTO_INCREMENT").catch(()=>{});
   await db("ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS ai_enabled TINYINT(1) DEFAULT 1").catch(()=>{});
 
+
+  await db(`CREATE TABLE IF NOT EXISTS ai_faq (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    title       VARCHAR(200) NOT NULL,
+    content     TEXT         NOT NULL,
+    category    VARCHAR(50)  DEFAULT 'general',
+    enabled     TINYINT(1)   DEFAULT 1,
+    created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+
+  await db(`CREATE TABLE IF NOT EXISTS ai_channels (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    channel_id  VARCHAR(30)  NOT NULL UNIQUE,
+    channel_name VARCHAR(100) NOT NULL DEFAULT 'unknown',
+    enabled     TINYINT(1)   DEFAULT 1,
+    created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
   // Add any missing columns to existing tables (safe migrations)
   const migrations = [
     "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS pending_close TINYINT(1) DEFAULT 0",

@@ -566,6 +566,109 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
           <div style="font-size:10px;color:var(--text3);margin-top:6px">Click to copy &#x1F4CB;</div>
         </div>
       </div>
+      <!-- Stale Reminder Settings (admin only) -->
+      <div class="table-wrap" id="stale-settings-section" style="padding:20px;margin-top:16px;display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+          <div>
+            <div style="font-size:15px;font-weight:700">&#x23F0; Stale Ticket Reminders</div>
+            <div style="font-size:12px;color:var(--text3);margin-top:3px">Ping staff in the ticket channel when a customer has been waiting too long for a reply.</div>
+          </div>
+          <!-- Toggle -->
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none">
+            <div style="position:relative">
+              <input type="checkbox" id="stale-enabled-chk" style="opacity:0;position:absolute;width:0;height:0" onchange="onStaleToggle()">
+              <div id="stale-toggle-track" style="width:44px;height:24px;border-radius:12px;background:var(--surface2);border:1px solid var(--border);transition:background .2s;cursor:pointer" onclick="document.getElementById('stale-enabled-chk').click()">
+                <div id="stale-toggle-thumb" style="position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#888;transition:transform .2s,background .2s"></div>
+              </div>
+            </div>
+            <span id="stale-toggle-label" style="font-size:12px;color:var(--text2);min-width:44px">Off</span>
+          </label>
+        </div>
+
+        <div id="stale-settings-fields" style="display:flex;flex-direction:column;gap:12px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div class="field">
+              <label>Minutes before first reminder</label>
+              <div style="display:flex;align-items:center;gap:8px">
+                <input class="sinput" id="stale-minutes" type="number" min="1" max="1440" placeholder="30" style="width:90px">
+                <span style="font-size:12px;color:var(--text3)">min</span>
+              </div>
+              <div style="font-size:11px;color:var(--text3);margin-top:4px">How long a ticket must be waiting before the first ping.</div>
+            </div>
+            <div class="field">
+              <label>Re-remind cooldown</label>
+              <div style="display:flex;align-items:center;gap:8px">
+                <input class="sinput" id="stale-cooldown" type="number" min="1" max="1440" placeholder="30" style="width:90px">
+                <span style="font-size:12px;color:var(--text3)">min</span>
+              </div>
+              <div style="font-size:11px;color:var(--text3);margin-top:4px">Minimum gap between repeated reminders on the same ticket.</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:4px">
+            <button class="btn sm primary" onclick="saveStaleSettings()">Save</button>
+            <span id="stale-save-st" style="font-size:12px;color:var(--text3)"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI FAQ / Knowledge Base (admin only) -->
+      <div class="table-wrap" id="faq-section" style="padding:24px;margin-top:16px;display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div class="section-title" style="font-size:15px;font-weight:700">🤖 AI Knowledge Base</div>
+          <button class="btn sm primary" onclick="showFaqForm()">+ Add Entry</button>
+        </div>
+        <p style="font-size:12px;color:var(--text3);margin:0 0 18px">FAQ entries are injected into the AI context so it can answer common questions automatically when a ticket is opened.</p>
+
+        <!-- Add/Edit form -->
+        <div id="faq-form" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:14px;color:var(--text2)" id="faq-form-title">New FAQ Entry</div>
+          <input type="hidden" id="faq-edit-id" value="">
+          <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-bottom:10px">
+            <div class="field"><label>Title / Question</label><input class="sinput" id="faq-title" placeholder="e.g. Cannot connect to FiveM server" type="text"></div>
+            <div class="field"><label>Category</label><input class="sinput" id="faq-category" placeholder="e.g. fivem, general" type="text" value="general"></div>
+          </div>
+          <div class="field" style="margin-bottom:14px"><label>Answer / Content</label><textarea class="sinput" id="faq-content" placeholder="Write the answer here. Be specific — the AI will use this text directly." rows="5" style="resize:vertical;width:100%;box-sizing:border-box"></textarea></div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn sm primary" onclick="saveFaqEntry()">Save Entry</button>
+            <button class="btn sm" onclick="hideFaqForm()">Cancel</button>
+            <span id="faq-form-st" style="font-size:12px;color:var(--text3)"></span>
+          </div>
+        </div>
+
+        <!-- FAQ list -->
+        <div id="faq-list"><div style="color:var(--text3);font-size:13px">Loading…</div></div>
+      </div>
+
+
+      <!-- AI Extra Channels (admin only) -->
+      <div class="table-wrap" id="ai-channels-section" style="padding:24px;margin-top:16px;display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div class="section-title" style="font-size:15px;font-weight:700">🐧 Penguin AI — Extra Channels</div>
+          <button class="btn sm primary" onclick="showAiChannelForm()">+ Add Channel</button>
+        </div>
+        <p style="font-size:12px;color:var(--text3);margin:0 0 18px">
+          Add Discord channel IDs where Penguin AI should be active outside of tickets.
+          Users can trigger a reply by <b>mentioning the bot</b> or starting their message with <b>?</b>.
+          Images are always analysed automatically.
+        </p>
+
+        <!-- Add form -->
+        <div id="aic-form" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:14px;color:var(--text2)">Add Channel</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+            <div class="field"><label>Channel ID</label><input class="sinput" id="aic-id" placeholder="e.g. 1234567890123456789" type="text"></div>
+            <div class="field"><label>Nickname (optional)</label><input class="sinput" id="aic-name" placeholder="e.g. #general-help" type="text"></div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn sm primary" onclick="saveAiChannel()">Add</button>
+            <button class="btn sm" onclick="hideAiChannelForm()">Cancel</button>
+            <span id="aic-form-st" style="font-size:12px;color:var(--text3)"></span>
+          </div>
+        </div>
+
+        <div id="aic-list"><div style="color:var(--text3);font-size:13px">Loading…</div></div>
+      </div>
+
       <!-- User Management (admin only) -->
       <div class="table-wrap" id="user-mgmt-section" style="padding:24px;margin-top:16px;display:none">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
@@ -1397,7 +1500,7 @@ function renderRows(tickets, tbodyId, cols) {
       <td style="font-size:11px;color:var(--text3)">${t.claimed_by_tag||'—'}</td>
       <td style="font-size:11px;color:var(--text3);font-family:var(--mono)">${fd(t.opened_at)}</td>
       <td>${t.rating?mkStars(t.rating):'<span style="color:var(--text3);font-size:11px">—</span>'}</td>
-      <td onclick="event.stopPropagation()">${t.status==='open'?`<button class="btn sm danger" onclick="quickClose(${t.id})">Close</button>`:''}
+      <td onclick="event.stopPropagation()">${(t.status==='open'||t.status==='Öppen')?`<button class="btn sm danger" onclick="quickClose('${t.id}')">Close</button>`:''}
       </td>
     </tr>`).join('');
 }
@@ -2083,6 +2186,10 @@ async function loadUsers() {
     if (!res.ok) return;
     const users = await res.json();
     document.getElementById('user-mgmt-section').style.display = 'block';
+    document.getElementById('faq-section').style.display = 'block';
+    loadFaqEntries();
+    document.getElementById('ai-channels-section').style.display = 'block';
+    loadAiChannels();
     const tbody = document.getElementById('users-tbody');
     if (!users.length) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text3)">No users yet</td></tr>'; return; }
     tbody.innerHTML = users.map(u => `
@@ -2168,8 +2275,286 @@ saveSettings = function() {
 };
 
 init();
-document.querySelector('[data-page="settings"]')?.addEventListener('click', () => { setTimeout(loadUsers, 300); });
+document.querySelector('[data-page="settings"]')?.addEventListener('click', () => {
+  setTimeout(loadUsers, 300);
+  setTimeout(loadStaleSettings, 300);
+});
+// ── Stale Reminder Settings ──────────────────────────────────────────────────
+async function loadStaleSettings() {
+  // Show the section only for admins
+  try {
+    const data = await api('/api/settings');
+    const section = document.getElementById('stale-settings-section');
+    if (section) section.style.display = 'block';
+    applyStaleSettings(data);
+  } catch(e) {
+    // non-admin or not available — hide section
+    const section = document.getElementById('stale-settings-section');
+    if (section) section.style.display = 'none';
+  }
+}
+
+function applyStaleSettings(data) {
+  const chk      = document.getElementById('stale-enabled-chk');
+  const track    = document.getElementById('stale-toggle-track');
+  const thumb    = document.getElementById('stale-toggle-thumb');
+  const label    = document.getElementById('stale-toggle-label');
+  const mins     = document.getElementById('stale-minutes');
+  const cooldown = document.getElementById('stale-cooldown');
+  if (!chk) return;
+
+  const enabled = !!data.staleRemindersEnabled;
+  chk.checked = enabled;
+  updateStaleToggleUI(enabled);
+  if (mins)     mins.value     = data.staleTicketMinutes           || 30;
+  if (cooldown) cooldown.value = data.staleReminderCooldownMinutes || 30;
+}
+
+function updateStaleToggleUI(enabled) {
+  const track = document.getElementById('stale-toggle-track');
+  const thumb = document.getElementById('stale-toggle-thumb');
+  const label = document.getElementById('stale-toggle-label');
+  if (!track) return;
+  if (enabled) {
+    track.style.background = 'var(--accent, #6366f1)';
+    thumb.style.transform  = 'translateX(20px)';
+    thumb.style.background = '#fff';
+    label.textContent      = 'On';
+  } else {
+    track.style.background = 'var(--surface2)';
+    thumb.style.transform  = 'translateX(0)';
+    thumb.style.background = '#888';
+    label.textContent      = 'Off';
+  }
+}
+
+function onStaleToggle() {
+  const enabled = document.getElementById('stale-enabled-chk').checked;
+  updateStaleToggleUI(enabled);
+}
+
+async function saveStaleSettings() {
+  const st      = document.getElementById('stale-save-st');
+  const enabled = document.getElementById('stale-enabled-chk').checked;
+  const mins    = parseInt(document.getElementById('stale-minutes').value)    || 30;
+  const cd      = parseInt(document.getElementById('stale-cooldown').value)   || 30;
+  st.style.color = 'var(--text3)';
+  st.textContent = 'Saving…';
+  try {
+    await api('/api/settings', { method: 'POST', body: {
+      staleRemindersEnabled:        enabled,
+      staleTicketMinutes:           mins,
+      staleReminderCooldownMinutes: cd,
+    }});
+    st.style.color = 'var(--green)';
+    st.textContent = '✓ Saved';
+    setTimeout(() => { st.textContent = ''; }, 3000);
+  } catch(e) {
+    st.style.color = '#f87171';
+    st.textContent = '✗ ' + e.message;
+  }
+}
+
 document.querySelector('[data-page="categories"]')?.addEventListener('click', () => { setTimeout(loadCategories, 200); });
+
+// ─── AI FAQ / Knowledge Base ──────────────────────────────────────────────────
+let faqEntries = [];
+
+async function loadFaqEntries() {
+  const list = document.getElementById('faq-list');
+  if (!list) return;
+  try {
+    faqEntries = await api('/api/faq');
+    renderFaqList();
+  } catch(e) {
+    list.innerHTML = '<div style="color:#f87171;font-size:13px">Failed to load: ' + e.message + '</div>';
+  }
+}
+
+function renderFaqList() {
+  const list = document.getElementById('faq-list');
+  if (!faqEntries.length) {
+    list.innerHTML = '<div style="color:var(--text3);font-size:13px;text-align:center;padding:20px">No FAQ entries yet. Add one above — the AI will use them to answer tickets automatically.</div>';
+    return;
+  }
+  // Group by category
+  const groups = {};
+  faqEntries.forEach(e => { (groups[e.category||'general'] = groups[e.category||'general']||[]).push(e); });
+  list.innerHTML = Object.entries(groups).map(([cat, items]) => `
+    <div style="margin-bottom:18px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:8px">${escHtml(cat)}</div>
+      ${items.map(e => `
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:8px;display:flex;align-items:flex-start;gap:12px">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <span style="font-size:13px;font-weight:600;color:var(--text)">${escHtml(e.title)}</span>
+              <span style="padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;${e.enabled?'background:rgba(52,211,153,.15);color:#34d399':'background:rgba(156,163,175,.15);color:var(--text3)'}">${e.enabled?'ACTIVE':'DISABLED'}</span>
+            </div>
+            <div style="font-size:12px;color:var(--text2);white-space:pre-wrap;line-height:1.5;max-height:60px;overflow:hidden;text-overflow:ellipsis">${escHtml(e.content.slice(0,200))}${e.content.length>200?'…':''}</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <button class="btn sm" onclick="editFaqEntry(${e.id})" style="padding:4px 10px;font-size:11px">✏️ Edit</button>
+            <button class="btn sm" onclick="toggleFaqEntry(${e.id},${e.enabled?0:1})" style="padding:4px 10px;font-size:11px">${e.enabled?'Disable':'Enable'}</button>
+            <button class="btn sm" onclick="deleteFaqEntry(${e.id})" style="padding:4px 10px;font-size:11px;color:#f87171">🗑</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
+}
+
+function showFaqForm(resetId) {
+  document.getElementById('faq-edit-id').value = resetId || '';
+  document.getElementById('faq-form-title').textContent = resetId ? 'Edit FAQ Entry' : 'New FAQ Entry';
+  if (!resetId) {
+    document.getElementById('faq-title').value = '';
+    document.getElementById('faq-content').value = '';
+    document.getElementById('faq-category').value = 'general';
+  }
+  document.getElementById('faq-form-st').textContent = '';
+  document.getElementById('faq-form').style.display = 'block';
+  document.getElementById('faq-title').focus();
+}
+
+function hideFaqForm() {
+  document.getElementById('faq-form').style.display = 'none';
+}
+
+function editFaqEntry(id) {
+  const e = faqEntries.find(f => f.id === id);
+  if (!e) return;
+  document.getElementById('faq-title').value    = e.title;
+  document.getElementById('faq-content').value  = e.content;
+  document.getElementById('faq-category').value = e.category || 'general';
+  showFaqForm(id);
+}
+
+async function saveFaqEntry() {
+  const st       = document.getElementById('faq-form-st');
+  const id       = document.getElementById('faq-edit-id').value;
+  const title    = document.getElementById('faq-title').value.trim();
+  const content  = document.getElementById('faq-content').value.trim();
+  const category = document.getElementById('faq-category').value.trim() || 'general';
+  if (!title || !content) { st.style.color='#f87171'; st.textContent='Title and content are required.'; return; }
+  st.style.color='var(--text3)'; st.textContent='Saving…';
+  try {
+    if (id) {
+      await api('/api/faq/' + id, { method: 'PUT', body: { title, content, category } });
+    } else {
+      await api('/api/faq', { method: 'POST', body: { title, content, category } });
+    }
+    st.style.color='var(--green)'; st.textContent='✓ Saved';
+    setTimeout(hideFaqForm, 800);
+    await loadFaqEntries();
+  } catch(e) {
+    st.style.color='#f87171'; st.textContent='✗ ' + e.message;
+  }
+}
+
+async function toggleFaqEntry(id, newEnabled) {
+  try {
+    await api('/api/faq/' + id, { method: 'PUT', body: { enabled: newEnabled } });
+    await loadFaqEntries();
+  } catch(e) { toast('Failed: ' + e.message, 'err'); }
+}
+
+async function deleteFaqEntry(id) {
+  if (!confirm('Delete this FAQ entry? The AI will no longer use it.')) return;
+  try {
+    await api('/api/faq/' + id, { method: 'DELETE' });
+    await loadFaqEntries();
+  } catch(e) { toast('Failed: ' + e.message, 'err'); }
+}
+
+
+// ─── Penguin AI Extra Channels ────────────────────────────────────────────────
+let aiChannelsList = [];
+
+async function loadAiChannels() {
+  const list = document.getElementById('aic-list');
+  if (!list) return;
+  try {
+    aiChannelsList = await api('/api/ai-channels');
+    renderAiChannels();
+  } catch(e) {
+    list.innerHTML = '<div style="color:#f87171;font-size:13px">Failed to load: ' + e.message + '</div>';
+  }
+}
+
+function renderAiChannels() {
+  const list = document.getElementById('aic-list');
+  if (!aiChannelsList.length) {
+    list.innerHTML = '<div style="color:var(--text3);font-size:13px;text-align:center;padding:20px">No extra channels added yet.</div>';
+    return;
+  }
+  list.innerHTML = aiChannelsList.map(c => `
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:8px;display:flex;align-items:center;gap:12px">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:13px;font-weight:600;color:var(--text)">${escHtml(c.channel_name)}</span>
+          <span style="font-size:11px;color:var(--text3);font-family:monospace">#${escHtml(c.channel_id)}</span>
+          <span style="padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;${c.enabled?'background:rgba(52,211,153,.15);color:#34d399':'background:rgba(156,163,175,.15);color:var(--text3)'}">${c.enabled?'ACTIVE':'DISABLED'}</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        <button class="btn sm" onclick="toggleAiChannel(${c.id},${c.enabled?0:1})" style="padding:4px 10px;font-size:11px">${c.enabled?'Disable':'Enable'}</button>
+        <button class="btn sm" onclick="deleteAiChannel(${c.id})" style="padding:4px 10px;font-size:11px;color:#f87171">🗑</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function showAiChannelForm() {
+  document.getElementById('aic-id').value = '';
+  document.getElementById('aic-name').value = '';
+  document.getElementById('aic-form-st').textContent = '';
+  document.getElementById('aic-form').style.display = 'block';
+  document.getElementById('aic-id').focus();
+}
+
+function hideAiChannelForm() {
+  document.getElementById('aic-form').style.display = 'none';
+}
+
+async function saveAiChannel() {
+  const st   = document.getElementById('aic-form-st');
+  const id   = document.getElementById('aic-id').value.trim();
+  const name = document.getElementById('aic-name').value.trim() || id;
+  if (!id || !/^\d{17,20}$/.test(id)) {
+    st.style.color = '#f87171';
+    st.textContent = 'Enter a valid Discord channel ID (17–20 digits).';
+    return;
+  }
+  st.style.color = 'var(--text3)'; st.textContent = 'Saving…';
+  try {
+    await api('/api/ai-channels', { method: 'POST', body: { channel_id: id, channel_name: name } });
+    st.style.color = 'var(--green)'; st.textContent = '✓ Added';
+    setTimeout(hideAiChannelForm, 800);
+    await loadAiChannels();
+  } catch(e) {
+    st.style.color = '#f87171'; st.textContent = '✗ ' + e.message;
+  }
+}
+
+async function toggleAiChannel(id, newEnabled) {
+  try {
+    await api('/api/ai-channels/' + id, { method: 'PUT', body: { enabled: newEnabled } });
+    await loadAiChannels();
+  } catch(e) { toast('Failed: ' + e.message, 'err'); }
+}
+
+async function deleteAiChannel(id) {
+  if (!confirm('Remove this channel from Penguin AI?')) return;
+  try {
+    await api('/api/ai-channels/' + id, { method: 'DELETE' });
+    await loadAiChannels();
+  } catch(e) { toast('Failed: ' + e.message, 'err'); }
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 </script>
 </body>
 </html>

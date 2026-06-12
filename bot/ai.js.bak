@@ -33,13 +33,13 @@ async function chat(messages, max_tokens = 300, temperature = 0.6) {
 async function buildFaqContext() {
   try {
     const rows = await db('SELECT title, content FROM ai_faq WHERE enabled = 1 ORDER BY category, title');
-    if (!rows || rows.length === 0) { console.log('[AI] FAQ: no entries found'); return null; }
+    if (!rows || rows.length === 0) { console.log('[AI] FAQ: no entries found'); return ''; }
     console.log('[AI] FAQ: loaded ' + rows.length + ' entries');
     const lines = rows.map(r => `### ${r.title}\n${r.content}`).join('\n\n');
     return '\n\n---\nKNOWLEDGE BASE (use this to answer if relevant):\n' + lines + '\n---';
   } catch (err) {
     console.error('[AI] FAQ load error:', err.message);
-    return null;
+    return '';
   }
 }
 
@@ -179,13 +179,9 @@ async function rawChat(systemPrompt, userMessage, max_tokens = 300) {
 // ── Reply to follow-up messages inside a ticket channel ──────────────────────
 async function replyInTicket(channel, userMessage, senderTag) {
   if (!groq) return;
-  console.log('[AI] replyInTicket triggered by', senderTag, ':', userMessage.slice(0, 60));
   try {
     const faqCtx = await buildFaqContext();
-    if (faqCtx === null) {
-      console.log('[AI] replyInTicket: FAQ table empty, skipping');
-      return;
-    }
+    if (!faqCtx) return; // no FAQ entries — nothing to base a reply on
 
     const systemPrompt =
       'You are a helpful support assistant for a Discord server ticket system. '

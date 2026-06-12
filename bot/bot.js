@@ -21,9 +21,21 @@ const SUPPORT_ROLE_IDS   = (process.env.SUPPORT_ROLE_IDS || '').split(',').map(s
 const SERVER_NAME        = process.env.SERVER_NAME || 'TicketDesk';
 const MAX_OPEN_TICKETS_PER_USER = Math.max(1, parseInt(process.env.MAX_OPEN_TICKETS_PER_USER || '5'));
 
-// Stale ticket reminders — nudge staff if a customer is waiting too long for a reply
-const STALE_TICKET_MINUTES   = Math.max(1, parseInt(process.env.STALE_TICKET_MINUTES || '30'));
-const STALE_REMINDER_COOLDOWN_MINUTES = Math.max(1, parseInt(process.env.STALE_REMINDER_COOLDOWN_MINUTES || '30'));
+// Stale ticket reminders — settings loaded dynamically from bot_settings.json
+const SETTINGS_PATH = path.join(__dirname, '..', 'bot_settings.json');
+const DEFAULT_STALE_SETTINGS = {
+  staleRemindersEnabled:        true,
+  staleTicketMinutes:           30,
+  staleReminderCooldownMinutes: 30,
+};
+function getStaleSettings() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
+    return { ...DEFAULT_STALE_SETTINGS, ...raw };
+  } catch {
+    return { ...DEFAULT_STALE_SETTINGS };
+  }
+}
 
 // Panel state (avoids duplicate on restart)
 const STATE_PATH = path.join(__dirname, '..', 'panel_state.json');
@@ -314,6 +326,10 @@ async function pollPanelReplies() {
 }
 
 async function pollStaleTickets() {
+  const cfg = getStaleSettings();
+  if (!cfg.staleRemindersEnabled) return; // disabled via panel settings
+  const STALE_TICKET_MINUTES           = cfg.staleTicketMinutes;
+  const STALE_REMINDER_COOLDOWN_MINUTES = cfg.staleReminderCooldownMinutes;
   try {
     // Open tickets, along with the most recent message (if any) so we know
     // who spoke last and how long ago.
@@ -472,6 +488,80 @@ client.on('messageCreate', async msg => {
      msg.content || '',
      attachments.length ? JSON.stringify(attachments) : null]
   ).catch(err => { if (err.code !== 'ER_DUP_ENTRY') console.error('[Msg] Save error:', err.message); });
+
+  // AI image analysis + reply — only for non-staff
+  const member2 = member || await msg.guild.members.fetch(msg.author.id).catch(() => null);
+  if (ai.enabled() && !isStaff(member2)) {
+    const images = attachments.filter(a =>
+      /\.(png|jpe?g|gif|webp)$/i.test(a.name || '') || (a.type || '').startsWith('image/')
+    );
+    for (const img of images) {
+      ai.handleImageMessage(msg.channel, img.url, msg.author.tag).catch(err => console.error('[AI] image failed:', err.message));
+    }
+
+    if (msg.content?.trim()) {
+      ai.replyInTicket(msg.channel, msg.content.trim(), msg.author.tag).catch(err => console.error('[AI] replyInTicket failed:', err.message));
+    }
+  }
+});
+
+// ─── AI: extra channels (non-ticket) ──────────────────────────────────────────
+// Cached list of extra AI channel IDs — refreshed every 60s
+let extraAiChannelIds = new Set();
+async function refreshAiChannels() {
+  try {
+    const rows = await db('SELECT channel_id FROM ai_channels WHERE enabled = 1');
+    extraAiChannelIds = new Set(rows.map(r => r.channel_id));
+  } catch { /* keep old set */ }
+}
+refreshAiChannels();
+setInterval(refreshAiChannels, 60_000);
+
+client.on('messageCreate', async msg => {
+  if (msg.author.bot || !msg.guild) return;
+  if (!extraAiChannelIds.has(msg.channel.id)) return;
+  if (!ai.enabled()) return;
+
+  // Image analysis
+  const attachments = [...msg.attachments.values()].map(a => ({
+    name: a.name, url: a.url, type: a.contentType || '',
+  }));
+  const images = attachments.filter(a =>
+    /\.(png|jpe?g|gif|webp)$/i.test(a.name || '') || (a.type || '').startsWith('image/')
+  );
+  for (const img of images) {
+    ai.handleImageMessage(msg.channel, img.url, msg.author.tag).catch(err => console.error('[AI] image failed:', err.message));
+  }
+
+  // Text reply — only if the message has actual content and mentions the bot or starts with '?'
+  const text = msg.content?.trim();
+  if (!text) return;
+  const mentioned = msg.mentions.has(client.user);
+  const askPrefix = text.startsWith('?');
+  if (!mentioned && !askPrefix) return;
+
+  const question = text.replace(/<@!?\d+>/g, '').replace(/^\?\s*/, '').trim();
+  if (!question) return;
+
+  try {
+    msg.channel.sendTyping().catch(() => {});
+    const faqCtx = await (async () => {
+      try {
+        const rows = await db('SELECT title, content FROM ai_faq WHERE enabled = 1 ORDER BY category, title');
+        if (!rows?.length) return '';
+        return '\n\n---\nKNOWLEDGE BASE:\n' + rows.map(r => `### ${r.title}\n${r.content}`).join('\n\n') + '\n---';
+      } catch { return ''; }
+    })();
+    const systemPrompt =
+      'You are a helpful support assistant for a Discord server. ' +
+      'Always reply in the SAME LANGUAGE the user wrote in (Swedish or English). ' +
+      'Be friendly, professional and concise. Keep replies under 150 words. ' +
+      'Never make up information. If the issue needs a human, say so clearly.' +
+      faqCtx;
+    const res = await ai.rawChat(systemPrompt, question);
+    const reply = res.choices[0]?.message?.content?.trim();
+    if (reply) await msg.reply({ content: reply });
+  } catch (err) { console.error('[AI:channel]', err.message); }
 });
 
 // ─── Interactions ──────────────────────────────────────────────────────────────
@@ -577,11 +667,12 @@ client.on('interactionCreate', async interaction => {
       console.log('[Bot] Created "' + type + '" ticket for ' + user.tag);
 
       // AI in background (only if enabled for this category)
-      if (ai.enabled() && cat.ai_enabled !== 0) {
+      if (ai.enabled() && cat.ai_enabled != 0) {
         ai.detectPriority(subject, description).then(p => {
           if (p && p !== 'normal') db('UPDATE tickets SET priority=? WHERE id=?', [p, ticketId]).catch(() => {});
         }).catch(() => {});
-        ai.suggestReply(ticketCh, subject, description, type).catch(() => {});
+        ai.suggestReply(ticketCh, subject, description, type).catch(err => console.error('[AI] suggestReply failed:', err.message));
+      } else {
       }
 
     } catch (err) {
