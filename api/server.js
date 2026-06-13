@@ -12,6 +12,7 @@ const statsRouter      = require('./routes/stats');
 const { router: settingsRouter } = require('./routes/settings');
 const faqRouter          = require('./routes/faq');
 const aiChannelsRouter   = require('./routes/aichannels');
+const templatesRouter    = require('./routes/templates');
 const { errorHandler } = require('./middleware/errorHandler');
 const { rateLimit }    = require('./middleware/rateLimit');
 
@@ -53,6 +54,7 @@ async function startAPI() {
   app.use('/api/settings',   settingsRouter);
   app.use('/api/faq',        faqRouter);
   app.use('/api/ai-channels', aiChannelsRouter);
+  app.use('/api/templates',  templatesRouter);
 
   // ── Panel static files ──────────────────────────────────────────────────────
   const panelDir = path.join(__dirname, '..', 'panel');

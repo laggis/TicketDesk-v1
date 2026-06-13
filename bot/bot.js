@@ -16,7 +16,8 @@ const TICKET_CHANNEL_ID  = process.env.TICKET_CHANNEL_ID;
 const TRANSCRIPT_CHANNEL = process.env.TRANSCRIPT_CHANNEL_ID;
 const MOD_LOG_CHANNEL    = process.env.MOD_LOG_CHANNEL_ID;
 const GUILD_ID           = process.env.GUILD_ID;
-const DELETE_DELAY       = parseInt(process.env.TICKET_DELETE_DELAY_MS || '5000');
+const DELETE_DELAY             = parseInt(process.env.TICKET_DELETE_DELAY_MS || '5000');
+const WEEKLY_SUMMARY_CHANNEL_ID = process.env.WEEKLY_SUMMARY_CHANNEL_ID || '';
 const SUPPORT_ROLE_IDS   = (process.env.SUPPORT_ROLE_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 const SERVER_NAME        = process.env.SERVER_NAME || 'TicketDesk';
 const MAX_OPEN_TICKETS_PER_USER = Math.max(1, parseInt(process.env.MAX_OPEN_TICKETS_PER_USER || '5'));
@@ -235,10 +236,38 @@ async function closeTicket(channel, ticketId, closedBy) {
       : null;
     if (tCh) await tCh.send({ content: '📄 Transcript `' + ticketId.slice(0,8) + '`', files: [{ attachment: buf, name: fname }] });
 
-    // DM opener
+    // DM opener — transcript + CSAT rating request
     if (opener?.created_by_id) {
       const u = await client.users.fetch(opener.created_by_id).catch(() => null);
-      if (u) await u.send({ content: '📄 Din ticket har stängts:', embeds: [embed], files: [{ attachment: buf, name: fname }] }).catch(() => {});
+      if (u) {
+        // 1) Transcript DM
+        await u.send({ content: '📄 Din ticket har stängts:', embeds: [embed], files: [{ attachment: buf, name: fname }] }).catch(() => {});
+
+        // 2) CSAT rating DM (only if not already sent)
+        const [csatCheck] = await db('SELECT csat_sent FROM tickets WHERE id=? LIMIT 1', [ticketId]).catch(() => [{}]);
+        if (!csatCheck?.csat_sent) {
+        await db('UPDATE tickets SET csat_sent=1 WHERE id=?', [ticketId]).catch(() => {});
+        const csatEmbed = new EmbedBuilder()
+          .setTitle('⭐ Hur nöjd var du med supporten?')
+          .setDescription(
+            'Vi skulle uppskatta om du tog en sekund och betygsatte din upplevelse med **' + SERVER_NAME + '** Support.\n\n' +
+            'Klicka på en stjärna nedan för att lämna ditt omdöme.'
+          )
+          .setColor('#6366f1')
+          .setFooter({ text: SERVER_NAME + ' Support • Ticket ' + ticketId.slice(0, 8) });
+
+        const starRow = new ActionRowBuilder().addComponents(
+          [1, 2, 3, 4, 5].map(n =>
+            new ButtonBuilder()
+              .setCustomId('csat_' + n + '_' + ticketId)
+              .setLabel('★'.repeat(n))
+              .setStyle(n <= 2 ? ButtonStyle.Danger : n === 3 ? ButtonStyle.Secondary : ButtonStyle.Success)
+          )
+        );
+
+        await u.send({ embeds: [csatEmbed], components: [starRow] }).catch(() => {});
+        } // end csat_sent guard
+      }
     }
 
     await channel.send({ embeds: [embed] });
@@ -443,8 +472,17 @@ client.once('ready', async () => {
     { name: 'add',          description: 'Lägg till användare i ticket', options: [{ name: 'user', type: 6, description: 'Användare', required: true }] },
     { name: 'remove',       description: 'Ta bort användare från ticket', options: [{ name: 'user', type: 6, description: 'Användare', required: true }] },
     { name: 'claim',        description: 'Claima denna ticket' },
+    { name: 'assign',       description: 'Tilldela denna ticket till en kollega', options: [
+      { name: 'staff', type: 6, description: 'Vem ska ta över ticketen', required: true },
+    ]},
     { name: 'priority',     description: 'Sätt prioritet på denna ticket', options: [{ name: 'level', type: 3, description: 'low / normal / urgent', required: true, choices: [{ name: 'low', value: 'low' }, { name: 'normal', value: 'normal' }, { name: 'urgent', value: 'urgent' }] }] },
     { name: 'summarise',    description: 'AI-sammanfattning av denna ticket (staff only)' },
+    { name: 'note',         description: 'Add an internal staff-only note to this ticket', options: [
+      { name: 'message', type: 3, description: 'The internal note content', required: true },
+    ]},
+    { name: 'template',     description: 'Send a saved reply template to this ticket', options: [
+      { name: 'name', type: 3, description: 'Pick a saved template', required: true, autocomplete: true },
+    ]},
     { name: 'refreshpanel', description: 'Uppdatera ticket-panelen (admin only)' },
   ];
 
@@ -463,6 +501,220 @@ client.once('ready', async () => {
   setInterval(pollCloseRequests, 10000);
   setInterval(pollPanelReplies, 5000);
   setInterval(pollStaleTickets, 60000);
+
+  // SLA breach poller — runs every 2 minutes
+  async function pollSlaBreaches() {
+    try {
+      // Find open tickets whose category has an SLA and first_response_at is still NULL
+      const rows = await db(`
+        SELECT t.id, t.channel_id, t.user_tag, t.category, t.opened_at, t.ticket_number,
+               c.sla_minutes, c.name AS cat_name, c.emoji AS cat_emoji
+        FROM tickets t
+        JOIN ticket_categories c ON LOWER(c.name) = LOWER(t.category)
+        WHERE (t.status = 'Öppen' OR t.status = 'open')
+          AND t.channel_id IS NOT NULL
+          AND t.first_response_at IS NULL
+          AND c.sla_minutes IS NOT NULL
+          AND TIMESTAMPDIFF(MINUTE, t.opened_at, NOW()) >= c.sla_minutes
+          AND (t.sla_breached = 0 OR t.sla_breached IS NULL)
+      `);
+
+      for (const t of rows) {
+        // Mark breached in DB
+        await db('UPDATE tickets SET sla_breached = 1 WHERE id = ?', [t.id]).catch(() => {});
+
+        // Post warning in the ticket channel
+        const ch = await client.channels.fetch(t.channel_id).catch(() => null);
+        if (!ch) continue;
+
+        const overMins = Math.floor(
+          (Date.now() - new Date(t.opened_at).getTime()) / 60000
+        ) - t.sla_minutes;
+        const overLabel = overMins >= 60
+          ? Math.floor(overMins / 60) + 'h ' + (overMins % 60) + 'm'
+          : overMins + 'm';
+
+        const slaEmbed = new EmbedBuilder()
+          .setTitle('⚠️ SLA Breach — No Response Yet')
+          .setDescription(
+            'This ticket has exceeded the **' + t.sla_minutes + ' min** first-response SLA for ' +
+            (t.cat_emoji || '') + ' **' + t.cat_name + '** by **' + overLabel + '**.' +
+            '\n\nPlease respond as soon as possible.'
+          )
+          .setColor('#ef4444')
+          .addFields(
+            { name: 'Customer', value: t.user_tag || '—', inline: true },
+            { name: 'Ticket #', value: String(t.ticket_number || t.id.slice(0,8)), inline: true },
+          )
+          .setFooter({ text: SERVER_NAME + ' SLA Monitor' })
+          .setTimestamp();
+
+        const supportRoles = SUPPORT_ROLE_IDS
+          .map(id => ch.guild?.roles.cache.get(id))
+          .filter(Boolean);
+
+        await ch.send({
+          content: supportRoles.length ? supportRoles.map(r => r.toString()).join(' ') : undefined,
+          embeds: [slaEmbed],
+        }).catch(() => {});
+
+        // Also mod-log
+        await modLog(ch.guild, {
+          action: 'SLABreach',
+          ticketId: t.id,
+          reason: 'No first response within ' + t.sla_minutes + ' min (category: ' + t.cat_name + ')',
+        }).catch(() => {});
+
+        console.log('[SLA] Breach: ticket', t.id.slice(0,8), 'category', t.cat_name);
+      }
+    } catch (err) {
+      console.error('[SLA] Poller error:', err.message);
+    }
+  }
+
+  pollSlaBreaches();
+  setInterval(pollSlaBreaches, 2 * 60 * 1000);
+
+  // ─── Weekly Summary ──────────────────────────────────────────────────────────
+  // Sends a rich embed to WEEKLY_SUMMARY_CHANNEL_ID every 7 days.
+  // Reuses the same queries as GET /api/stats — no additional DB queries.
+  async function postWeeklySummary() {
+    if (!WEEKLY_SUMMARY_CHANNEL_ID) return; // Not configured — skip silently
+
+    const summaryChannel = client.channels.cache.get(WEEKLY_SUMMARY_CHANNEL_ID)
+      || await client.channels.fetch(WEEKLY_SUMMARY_CHANNEL_ID).catch(() => null);
+    if (!summaryChannel) {
+      console.error('[Weekly] Channel not found:', WEEKLY_SUMMARY_CHANNEL_ID);
+      return;
+    }
+
+    try {
+      // ── Overview (mirrors /api/stats overview query, scoped to last 7 days) ──
+      const [overview] = await db(`
+        SELECT
+          SUM(1)                                                                   AS total_opened,
+          SUM(status = 'closed' OR status = 'Stängd')                             AS total_closed,
+          ROUND(AVG(CASE WHEN closed_at IS NOT NULL
+            THEN TIMESTAMPDIFF(HOUR, opened_at, closed_at) END), 1)               AS avg_close_hours,
+          ROUND(AVG(CASE WHEN first_response_at IS NOT NULL
+            THEN TIMESTAMPDIFF(MINUTE, opened_at, first_response_at) END), 0)     AS avg_first_response_minutes,
+          ROUND(AVG(rating), 2)                                                    AS avg_rating,
+          SUM(priority = 'urgent')                                                 AS urgent_count
+        FROM tickets
+        WHERE opened_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+      `);
+
+      // ── Top categories ────────────────────────────────────────────────────────
+      const byCategory = await db(`
+        SELECT category, COUNT(*) AS count
+        FROM tickets
+        WHERE opened_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        GROUP BY category
+        ORDER BY count DESC
+        LIMIT 5
+      `);
+
+      // ── Busiest days ──────────────────────────────────────────────────────────
+      const byDay = await db(`
+        SELECT DAYNAME(opened_at) AS day_name, COUNT(*) AS count
+        FROM tickets
+        WHERE opened_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        GROUP BY DAYNAME(opened_at), DAYOFWEEK(opened_at)
+        ORDER BY DAYOFWEEK(opened_at)
+      `);
+
+      // ── Format helpers ────────────────────────────────────────────────────────
+      const fmt = v => (v === null || v === undefined) ? '—' : String(v);
+
+      const avgClose = overview.avg_close_hours !== null
+        ? (overview.avg_close_hours >= 24
+            ? (overview.avg_close_hours / 24).toFixed(1) + 'd'
+            : overview.avg_close_hours + 'h')
+        : '—';
+
+      const avgResponse = overview.avg_first_response_minutes !== null
+        ? (overview.avg_first_response_minutes >= 60
+            ? Math.floor(overview.avg_first_response_minutes / 60) + 'h ' +
+              (overview.avg_first_response_minutes % 60) + 'm'
+            : overview.avg_first_response_minutes + 'm')
+        : '—';
+
+      const categoryLines = byCategory.length
+        ? byCategory
+            .map((r, i) => `\`${i + 1}.\` **${r.category || 'Unknown'}** — ${r.count} tickets`)
+            .join('\n')
+        : '_No data_';
+
+      const dayRows = byDay;
+      const maxDayCount = dayRows.reduce((m, r) => Math.max(m, Number(r.count)), 0) || 1;
+      const dayLines = dayRows.length
+        ? dayRows
+            .map(r => {
+              const pct  = Number(r.count) / maxDayCount;
+              const bars = Math.round(pct * 10);
+              const bar  = '█'.repeat(bars) + '░'.repeat(10 - bars);
+              return `\`${(r.day_name || '').slice(0, 3)}\` ${bar} ${r.count}`;
+            })
+            .join('\n')
+        : '_No data_';
+
+      // ── Build embed ───────────────────────────────────────────────────────────
+      const now    = new Date();
+      const weekEnd = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      const weekStart = new Date(now - 7 * 24 * 60 * 60 * 1000)
+        .toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+      const embed = new EmbedBuilder()
+        .setTitle('📊 Weekly Ticket Summary')
+        .setDescription(`**${weekStart} → ${weekEnd}**\nHere's how the support team performed this week.`)
+        .setColor('#6366f1')
+        .addFields(
+          {
+            name: '🎫 Tickets',
+            value: [
+              `**Opened:** ${fmt(overview.total_opened)}`,
+              `**Closed:** ${fmt(overview.total_closed)}`,
+              `**Urgent:** ${fmt(overview.urgent_count)}`,
+            ].join('\n'),
+            inline: true,
+          },
+          {
+            name: '⏱️ Response Times',
+            value: [
+              `**Avg First Response:** ${avgResponse}`,
+              `**Avg Resolution:** ${avgClose}`,
+              `**Avg Rating:** ${overview.avg_rating !== null ? '⭐ ' + fmt(overview.avg_rating) : '—'}`,
+            ].join('\n'),
+            inline: true,
+          },
+          { name: '\u200b', value: '\u200b', inline: false }, // spacer
+          {
+            name: '🏷️ Top Categories',
+            value: categoryLines,
+            inline: true,
+          },
+          {
+            name: '📅 Tickets by Day',
+            value: dayLines,
+            inline: true,
+          },
+        )
+        .setFooter({ text: SERVER_NAME + ' · Auto-generated weekly summary' })
+        .setTimestamp();
+
+      await summaryChannel.send({ embeds: [embed] });
+      console.log('[Weekly] Summary posted for week ending', weekEnd);
+    } catch (err) {
+      console.error('[Weekly] Failed to post summary:', err.message);
+    }
+  }
+
+  // Schedule: fire once 7 days after bot starts, then every 7 days.
+  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+  setInterval(postWeeklySummary, SEVEN_DAYS_MS);
+  console.log('[Weekly] Summary scheduled every 7 days.');
+  // ─────────────────────────────────────────────────────────────────────────────
+
   console.log('[Bot] Pollers started.');
 });
 
@@ -488,6 +740,14 @@ client.on('messageCreate', async msg => {
      msg.content || '',
      attachments.length ? JSON.stringify(attachments) : null]
   ).catch(err => { if (err.code !== 'ER_DUP_ENTRY') console.error('[Msg] Save error:', err.message); });
+
+  // Set first_response_at when staff sends the first reply in a ticket
+  if (member && isStaff(member)) {
+    db(
+      'UPDATE tickets SET first_response_at = NOW() WHERE id = ? AND first_response_at IS NULL',
+      [match[1]]
+    ).catch(() => {});
+  }
 
   // AI image analysis + reply — only for non-staff
   const member2 = member || await msg.guild.members.fetch(msg.author.id).catch(() => null);
@@ -566,6 +826,22 @@ client.on('messageCreate', async msg => {
 
 // ─── Interactions ──────────────────────────────────────────────────────────────
 client.on('interactionCreate', async interaction => {
+
+  // ── Autocomplete: /template name ───────────────────────────────────────────
+  if (interaction.isAutocomplete() && interaction.commandName === 'template') {
+    try {
+      const focused = (interaction.options.getFocused() || '').toString().toLowerCase();
+      const rows = await db('SELECT id, title, category FROM reply_templates WHERE enabled = 1 ORDER BY category, title LIMIT 100');
+      const filtered = rows
+        .filter(r => !focused || r.title.toLowerCase().includes(focused) || (r.category || '').toLowerCase().includes(focused))
+        .slice(0, 25)
+        .map(r => ({ name: `${r.title}${r.category ? ' · ' + r.category : ''}`.slice(0, 100), value: String(r.id) }));
+      await interaction.respond(filtered).catch(() => {});
+    } catch {
+      await interaction.respond([]).catch(() => {});
+    }
+    return;
+  }
 
   // ── Ticket button → show modal immediately ────────────────────────────────
   if (interaction.isButton() && interaction.customId.startsWith('ticket_') && !interaction.customId.startsWith('ticket_close')) {
@@ -695,6 +971,46 @@ client.on('interactionCreate', async interaction => {
     return interaction.reply({ content: '✅ Sent!', flags: 64 });
   }
 
+  // ── CSAT rating buttons ─────────────────────────────────────────────────────────
+  if (interaction.isButton() && interaction.customId.startsWith('csat_')) {
+    // customId format: csat_<score>_<ticketId>
+    const parts    = interaction.customId.split('_');
+    const score    = parseInt(parts[1]);
+    const ticketId = parts.slice(2).join('_');
+
+    if (!score || score < 1 || score > 5 || !ticketId) return;
+
+    // Fetch ticket to verify this user owns it
+    const [ticket] = await db('SELECT created_by_id, rating FROM tickets WHERE id=? LIMIT 1', [ticketId]).catch(() => []);
+    if (!ticket) return interaction.reply({ content: '❌ Ticket hittades inte.', flags: 64 });
+    if (ticket.created_by_id !== interaction.user.id) return interaction.reply({ content: '⛔ Du kan inte betygsätta andras tickets.', flags: 64 });
+    if (ticket.rating) return interaction.reply({ content: 'ℹ️ Du har redan betygsättat den här ticketen.', flags: 64 });
+
+    // Save rating to DB
+    await db('UPDATE tickets SET rating=? WHERE id=?', [score, ticketId]).catch(() => {});
+
+    // Stars label
+    const stars = '★'.repeat(score) + '☆'.repeat(5 - score);
+
+    // Update the DM message to show the rating is saved
+    const confirmedEmbed = new EmbedBuilder()
+      .setTitle('✅ Tack för ditt omdöme!')
+      .setDescription(
+        'Du gav **' + score + '/5** ' + stars + '\n\n' +
+        'Ditt omdöme har sparats och hjälper oss att förbättra vår support. Tack!'
+      )
+      .setColor(score >= 4 ? '#22c55e' : score === 3 ? '#f59e0b' : '#ef4444')
+      .setFooter({ text: SERVER_NAME + ' Support • Ticket ' + ticketId.slice(0, 8) });
+
+    // Edit the original DM to remove buttons and show confirmation
+    await interaction.update({ embeds: [confirmedEmbed], components: [] }).catch(() => {
+      // If update fails (e.g. DM already gone), just ack
+      interaction.reply({ content: '✅ Betyg sparat: ' + stars, flags: 64 }).catch(() => {});
+    });
+
+    return;
+  }
+
   // ── Close button ──────────────────────────────────────────────────────────
   if (interaction.isButton() && interaction.customId.startsWith('ticket_close_')) {
     const ticketId = interaction.customId.replace('ticket_close_', '');
@@ -746,6 +1062,148 @@ client.on('interactionCreate', async interaction => {
   }
 
   // ── /summarise ────────────────────────────────────────────────────────────
+  // ── /note <message> ────────────────────────────────────────────────────────────────────────
+  if (interaction.isChatInputCommand() && interaction.commandName === 'note') {
+    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    if (!member || !isStaff(member)) {
+      return interaction.reply({ content: '\u26d4 Staff only.', flags: 64 });
+    }
+
+    const match = (interaction.channel.topic || '').match(/ID: ([a-f0-9-]{36})/);
+    if (!match) {
+      return interaction.reply({ content: '\u274c Only works inside a ticket channel.', flags: 64 });
+    }
+    const ticketId = match[1];
+    const noteText = interaction.options.getString('message', true);
+
+    await interaction.deferReply({ flags: 64 });
+
+    try {
+      // Find or create a private Staff Notes thread on this channel
+      let thread = interaction.channel.threads.cache.find(t => t.name === '\ud83d\udd12 Staff Notes' && !t.archived);
+
+      if (!thread) {
+        // Try to find an archived one and unarchive it first
+        const archived = await interaction.channel.threads.fetchArchived({ type: 'private' }).catch(() => null);
+        thread = archived?.threads.find(t => t.name === '\ud83d\udd12 Staff Notes') || null;
+        if (thread?.archived) {
+          await thread.setArchived(false).catch(() => { thread = null; });
+        }
+      }
+
+      if (!thread) {
+        const { ChannelType } = require('discord.js');
+        thread = await interaction.channel.threads.create({
+          name: '\ud83d\udd12 Staff Notes',
+          type: ChannelType.PrivateThread,
+          invitable: false,   // only staff with ManageThreads can add members
+          reason: 'Staff notes thread for ticket ' + ticketId.slice(0, 8),
+        }).catch(() => null);
+      }
+
+      if (!thread) {
+        // Fallback: private thread creation may be unavailable (no boost) — post in channel with clear visual
+        const fallbackEmbed = new EmbedBuilder()
+          .setDescription('\ud83d\udd12 **Staff Note** (internal)\n\n' + noteText)
+          .setColor('#f59e0b')
+          .setAuthor({ name: interaction.user.tag, iconURL: interaction.user.displayAvatarURL({ size: 64 }) })
+          .setTimestamp()
+          .setFooter({ text: 'Internal staff note • ' + SERVER_NAME });
+        await interaction.channel.send({ embeds: [fallbackEmbed] }).catch(() => {});
+      } else {
+        // Add the author to the thread if not already in it
+        await thread.members.add(interaction.user.id).catch(() => {});
+
+        const noteEmbed = new EmbedBuilder()
+          .setDescription(noteText)
+          .setColor('#f59e0b')
+          .setAuthor({ name: interaction.user.tag, iconURL: interaction.user.displayAvatarURL({ size: 64 }) })
+          .setTimestamp()
+          .setFooter({ text: 'Internal staff note • ' + SERVER_NAME });
+        await thread.send({ embeds: [noteEmbed] }).catch(() => {});
+      }
+
+      // Save to ticket_notes (dedicated, searchable table) and ticket_logs (activity feed)
+      await db(
+        'INSERT INTO ticket_notes (ticket_id, staff_id, staff_tag, note, source) VALUES (?,?,?,?,?)',
+        [ticketId, interaction.user.id, interaction.user.tag, noteText, 'discord']
+      ).catch(() => {});
+
+      await db(
+        'INSERT INTO ticket_logs (ticket_id, staff_id, staff_tag, action, details) VALUES (?,?,?,?,?)',
+        [ticketId, interaction.user.id, interaction.user.tag, 'note', noteText]
+      ).catch(() => {});
+
+      await modLog(interaction.guild, {
+        action: 'StaffNote',
+        actor: interaction.user,
+        channel: interaction.channel,
+        ticketId,
+        reason: noteText.slice(0, 200),
+      }).catch(() => {});
+
+      await interaction.editReply({ content: '\ud83d\udd12 Note saved.' });
+    } catch (err) {
+      console.error('[/note] Error:', err.message);
+      await interaction.editReply({ content: '\u274c Failed to save note: ' + err.message });
+    }
+    return;
+  }
+
+  // ── /template <name> ────────────────────────────────────────────────────────
+  if (interaction.isChatInputCommand() && interaction.commandName === 'template') {
+    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    if (!member || !isStaff(member)) {
+      return interaction.reply({ content: '\u26d4 Staff only.', flags: 64 });
+    }
+
+    const match = (interaction.channel.topic || '').match(/ID: ([a-f0-9-]{36})/);
+    if (!match) {
+      return interaction.reply({ content: '\u274c Only works inside a ticket channel.', flags: 64 });
+    }
+    const ticketId = match[1];
+    const templateId = interaction.options.getString('name', true);
+
+    await interaction.deferReply({ flags: 64 });
+
+    try {
+      const [tpl] = await db('SELECT * FROM reply_templates WHERE id = ? AND enabled = 1', [templateId]);
+      if (!tpl) {
+        return interaction.editReply({ content: '\u274c Template not found (it may have been deleted or disabled). Try the command again to refresh the list.' });
+      }
+
+      // Simple placeholder substitution
+      const [ticket] = await db('SELECT created_by_id, user_tag FROM tickets WHERE id = ?', [ticketId]).catch(() => []);
+      let content = tpl.content
+        .replace(/\{user\}/gi, ticket?.created_by_id ? `<@${ticket.created_by_id}>` : (ticket?.user_tag || 'there'))
+        .replace(/\{staff\}/gi, interaction.user.toString())
+        .replace(/\{ticket\}/gi, '#' + (ticketId.slice(0, 8)));
+
+      const sent = await interaction.channel.send({ content }).catch(() => null);
+      if (!sent) return interaction.editReply({ content: '\u274c Failed to send the template message.' });
+
+      // Save to ticket_messages so it shows up in the panel transcript
+      await db(
+        'INSERT INTO ticket_messages (ticket_id, discord_msg_id, author_id, author_tag, avatar_url, is_staff, content) VALUES (?,?,?,?,?,?,?)',
+        [ticketId, sent.id, interaction.user.id, interaction.user.tag, interaction.user.displayAvatarURL({ size: 64, extension: 'png' }), 1, content]
+      ).catch(() => {});
+
+      await db('UPDATE tickets SET first_response_at = NOW() WHERE id = ? AND first_response_at IS NULL', [ticketId]).catch(() => {});
+      await db('UPDATE reply_templates SET usage_count = usage_count + 1 WHERE id = ?', [templateId]).catch(() => {});
+
+      await db(
+        'INSERT INTO ticket_logs (ticket_id, staff_id, staff_tag, action, details) VALUES (?,?,?,?,?)',
+        [ticketId, interaction.user.id, interaction.user.tag, 'template', tpl.title]
+      ).catch(() => {});
+
+      await interaction.editReply({ content: '\u2705 Sent template "' + tpl.title + '".' });
+    } catch (err) {
+      console.error('[/template] Error:', err.message);
+      await interaction.editReply({ content: '\u274c Failed to send template: ' + err.message });
+    }
+    return;
+  }
+
   if (interaction.isChatInputCommand() && interaction.commandName === 'summarise') {
     const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
     if (!member || !isStaff(member)) return interaction.reply({ content: '🚫 Staff only.', flags: 64 });
@@ -825,6 +1283,50 @@ client.on('interactionCreate', async interaction => {
     await modLog(interaction.guild, { action: 'ClaimTicket', actor: interaction.user, channel: interaction.channel, ticketId: match[1] });
     return;
   }
+
+  if (interaction.isChatInputCommand() && interaction.commandName === 'assign') {
+    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    if (!member || !isStaff(member)) return interaction.reply({ content: '🚫 Saknar behörighet.', flags: 64 });
+
+    const match = (interaction.channel.topic || '').match(/ID: ([a-f0-9-]{36})/);
+    if (!match) return interaction.reply({ content: '❌ Endast i ticket-kanaler.', flags: 64 });
+    const ticketId = match[1];
+
+    const target = interaction.options.getUser('staff', true);
+    if (target.bot) return interaction.reply({ content: '⚠ Kan inte tilldela en bot.', flags: 64 });
+
+    const targetMember = await interaction.guild.members.fetch(target.id).catch(() => null);
+    if (!targetMember || !isStaff(targetMember)) {
+      return interaction.reply({ content: '⚠ ' + target.toString() + ' är inte staff.', flags: 64 });
+    }
+
+    await interaction.deferReply({ flags: 64 });
+
+    await db('UPDATE tickets SET assigned_to=?, assigned_to_tag=? WHERE id=?', [target.id, target.tag, ticketId]).catch(() => null);
+    await db('INSERT INTO ticket_logs (ticket_id, staff_id, staff_tag, action, details) VALUES (?,?,?,?,?)',
+      [ticketId, interaction.user.id, interaction.user.tag, 'assign', target.tag]).catch(() => null);
+
+    // Update channel topic with the new assignee, replacing any previous "Tilldelad" tag
+    try {
+      const currentTopic = interaction.channel.topic || '';
+      const withoutAssign = currentTopic.replace(/\s*\|\s*Tilldelad:[^|]*/i, '');
+      await interaction.channel.setTopic((withoutAssign + ' | Tilldelad: ' + target.tag).slice(0, 1024)).catch(() => {});
+    } catch {}
+
+    await interaction.channel.send({
+      content: '📌 ' + interaction.user.toString() + ' tilldelade denna ticket till ' + target.toString() + '.'
+    }).catch(() => {});
+
+    // Notify the new owner via DM
+    await target.send({
+      content: '📌 ' + interaction.user.tag + ' tilldelade dig en ticket i ' + (interaction.guild.name || SERVER_NAME) + ': ' + interaction.channel.toString(),
+    }).catch(() => {});
+
+    await interaction.editReply({ content: '✅ Tilldelad till ' + target.toString() + '.' }).catch(() => {});
+    await modLog(interaction.guild, { action: 'AssignTicket', actor: interaction.user, target, channel: interaction.channel, ticketId });
+    return;
+  }
+
 
   if (interaction.isChatInputCommand() && interaction.commandName === 'priority') {
     const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);

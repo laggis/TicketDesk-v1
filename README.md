@@ -114,7 +114,38 @@ Tune both values in `.env` to fit your team — e.g. lower `STALE_TICKET_MINUTES
 
 ---
 
+## Saved Reply Templates (NEW)
+
+Manage canned responses from the panel → Settings → **💬 Saved Reply Templates**:
+
+- ➕ Add a template with a title, category, and message content
+- ✏️ Edit, ✅ enable/disable, or 🗑 delete any template
+- Usage count is tracked so you can see which templates staff actually use
+
+In Discord, staff run `/template` inside a ticket channel and pick from an autocomplete dropdown of enabled templates (filterable by title or category). The bot posts the template's content as a normal reply in the ticket — visible to the customer — and logs it to the ticket's transcript and activity feed.
+
+Placeholders available in template content:
+- `{user}` — mentions the ticket's creator
+- `{staff}` — mentions the staff member running the command
+- `{ticket}` — the short ticket reference (e.g. `#a1b2c3d4`)
+
+---
+
+## Ticket Assignment (NEW)
+
+Hand off a ticket to a teammate with `/assign @staff` inside a ticket channel:
+
+- Only staff can be assigned (the target must have one of `SUPPORT_ROLE_IDS` or `ManageChannels`).
+- Sets `assigned_to` / `assigned_to_tag` on the ticket.
+- Updates the channel topic with `| Tilldelad: <tag>` (replacing any previous assignment).
+- Posts a message in the channel and sends the new owner a DM so they know they've got a ticket waiting.
+
+From the panel, use the **📌 Assign** button on a ticket to set/update the displayed assignee, and filter Live Tickets by **Assigned to** (or the **Unassigned** quick filter) to see who's working on what. Note: assigning from the panel only updates the label shown in the panel — the Discord notification happens via `/assign`.
+
+---
+
 ## Discord Commands
+
 
 | Command | Who | What |
 |---------|-----|------|
@@ -123,9 +154,12 @@ Tune both values in `.env` to fit your team — e.g. lower `STALE_TICKET_MINUTES
 | `/add <user>` | Staff | Add a user to the current ticket channel |
 | `/remove <user>` | Staff | Remove a user from the current ticket channel |
 | `/claim` | Staff | Claim the current ticket |
+| `/assign @staff` | Staff | Hand the ticket to another staff member, updates topic & notifies them |
 | `/priority <low|normal|urgent>` | Staff | Set priority on the current ticket |
 | `/ticket ban <user>` | Mods | Ban user from tickets |
 | `/ticket unban <user>` | Mods | Unban user |
+| `/note` | Staff | Add an internal staff-only note (private thread, searchable from panel) |
+| `/template <name>` | Staff | Send a saved reply template to the customer (autocomplete) |
 | `/summarise` | Staff | AI summary of current ticket |
 
 ---

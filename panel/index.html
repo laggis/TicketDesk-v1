@@ -357,6 +357,7 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
   <nav class="icon-sidebar">
     <button class="icon-btn active" data-page="tickets"  onclick="nav('tickets',this)"  data-tip="Live Tickets">🎫<span class="icon-badge" id="ib-open"></span></button>
     <button class="icon-btn"        data-page="archive"  onclick="nav('archive',this)"  data-tip="Archive & Search">🗂</button>
+    <button class="icon-btn"        data-page="notes"    onclick="nav('notes',this)"    data-tip="Staff Notes">🔒</button>
     <div class="icon-sep"></div>
     <button class="icon-btn"        data-page="stats"    onclick="nav('stats',this)"    data-tip="Analytics">📊</button>
     <button class="icon-btn"        data-page="users"    onclick="nav('users',this)"    data-tip="User Profiles">👤</button>
@@ -389,10 +390,12 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
         <button class="fpill" onclick="setSt('archived',this)">Archived</button>
         <select class="fsel" id="f-prio" onchange="loadTickets()"><option value="">Priority</option><option value="urgent">Urgent</option><option value="normal">Normal</option><option value="low">Low</option></select>
         <select class="fsel" id="f-cat"  onchange="loadTickets()"><option value="">Category</option><option value="support">Support</option><option value="appeal">Appeal</option><option value="billing">Billing</option><option value="report">Report</option><option value="general">General</option></select>
+        <input class="fsel" id="f-assigned" placeholder="Assigned to…" oninput="loadTicketsDebounced()" style="min-width:140px">
+        <button class="fpill" onclick="document.getElementById('f-assigned').value='unassigned';loadTickets()" title="Show only unassigned tickets">Unassigned</button>
       </div>
       <div class="table-wrap">
-        <table><thead><tr><th>#</th><th>User</th><th>Category</th><th>Status</th><th>Priority</th><th>Claimed</th><th>Opened</th><th>⭐</th><th></th></tr></thead>
-        <tbody id="t-tbody"><tr><td colspan="9" style="text-align:center;color:var(--text3);padding:40px">Loading…</td></tr></tbody></table>
+        <table><thead><tr><th>#</th><th>User</th><th>Category</th><th>Status</th><th>Priority</th><th>Claimed</th><th>Assigned</th><th>Opened</th><th>⭐</th><th></th></tr></thead>
+        <tbody id="t-tbody"><tr><td colspan="10" style="text-align:center;color:var(--text3);padding:40px">Loading…</td></tr></tbody></table>
         <div class="pag" id="t-pag"></div>
       </div>
     </div>
@@ -415,6 +418,17 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
       </div>
     </div>
 
+    <!-- STAFF NOTES -->
+    <div class="page" id="page-notes">
+      <div class="page-header"><div><div class="page-title">Staff Notes</div><div class="page-sub">Search internal, staff-only notes across all tickets</div></div></div>
+      <div class="asearch"><span style="color:var(--text3);font-size:18px">🔍</span><input type="text" placeholder="Search note text, username, ticket number, or staff member…" id="nq" oninput="notesSearch()"><button class="btn sm primary" onclick="notesSearch()">Search</button></div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Ticket</th><th>User</th><th>Staff</th><th>Note</th><th>Added</th></tr></thead>
+        <tbody id="n-tbody"><tr><td colspan="5" style="text-align:center;color:var(--text3);padding:40px">Enter a search term to find staff notes, or leave blank to see the most recent.</td></tr></tbody></table>
+        <div class="pag" id="n-pag"></div>
+      </div>
+    </div>
+
     <!-- STATS -->
     <div class="page" id="page-stats">
       <div class="page-title">Analytics</div>
@@ -423,6 +437,13 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
         <div class="stat-card c2"><div class="stat-glow"></div><div class="stat-label">This Week</div><div class="stat-value" id="as-wk">—</div></div>
         <div class="stat-card c3"><div class="stat-glow"></div><div class="stat-label">First Resp (min)</div><div class="stat-value" id="as-resp">—</div></div>
         <div class="stat-card c4"><div class="stat-glow"></div><div class="stat-label">Rating</div><div class="stat-value" id="as-rt">—</div></div>
+      </div>
+      <div class="table-wrap" id="sla-breach-panel" style="padding:16px;margin-bottom:12px;border-left:3px solid #ef4444;display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div style="font-size:11px;color:#f87171;text-transform:uppercase;letter-spacing:1px;font-weight:700">⚠ SLA Breaches — Awaiting First Response</div>
+          <span id="sla-breach-count" style="font-size:11px;background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.3);padding:2px 8px;border-radius:99px"></span>
+        </div>
+        <div id="sla-breach-list"></div>
       </div>
       <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px">
         <div class="table-wrap" style="padding:16px"><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:12px">Daily Volume (14 days)</div><div id="barchart" style="height:96px;display:flex;align-items:flex-end;gap:3px"></div></div>
@@ -485,6 +506,11 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
             <div class="field"><label>Description</label><input class="sinput" id="nc-desc" placeholder="Short description"></div>
           </div>
           <div style="margin-bottom:12px">
+            <div class="field"><label>⏱ First-Response SLA <span style="font-size:11px;color:var(--text3);font-weight:400">(minutes, optional)</span></label>
+              <div style="display:flex;align-items:center;gap:8px"><input class="sinput" id="nc-sla" type="number" min="1" max="1440" placeholder="e.g. 60" style="width:110px"><span style="font-size:12px;color:var(--text3)">min — bot pings staff if no reply within this time</span></div>
+            </div>
+          </div>
+          <div style="margin-bottom:12px">
             <div class="field">
               <label>Discord Category ID</label>
               <input class="sinput" id="nc-catid" placeholder="Leave empty if using auto-create below">
@@ -511,8 +537,11 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
             <div class="field"><label>Name</label><input class="sinput" id="ec-name"></div>
             <div class="field"><label>Description</label><input class="sinput" id="ec-desc"></div>
           </div>
-          <div style="margin-bottom:12px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
             <div class="field"><label>Discord Category ID</label><input class="sinput" id="ec-catid"></div>
+            <div class="field"><label>⏱ First-Response SLA <span style="font-size:11px;color:var(--text3);font-weight:400">(minutes, optional)</span></label>
+              <div style="display:flex;align-items:center;gap:8px"><input class="sinput" id="ec-sla" type="number" min="1" max="1440" placeholder="e.g. 60" style="width:110px"><span style="font-size:12px;color:var(--text3)">min</span></div>
+            </div>
           </div>
           <div style="display:flex;gap:8px">
             <button class="btn sm primary" onclick="saveCat()">Save Changes</button>
@@ -609,6 +638,34 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
             <span id="stale-save-st" style="font-size:12px;color:var(--text3)"></span>
           </div>
         </div>
+      </div>
+
+      <!-- Reply Templates -->
+      <div class="table-wrap" id="templates-section" style="padding:24px;margin-top:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div class="section-title" style="font-size:15px;font-weight:700">💬 Saved Reply Templates</div>
+          <button class="btn sm primary" onclick="showTemplateForm()">+ Add Template</button>
+        </div>
+        <p style="font-size:12px;color:var(--text3);margin:0 0 18px">Staff can send these with <code style="background:var(--bg2);padding:1px 6px;border-radius:4px;font-family:var(--mono)">/template</code> in a ticket channel (autocomplete by name). Use <code style="background:var(--bg2);padding:1px 6px;border-radius:4px;font-family:var(--mono)">{user}</code>, <code style="background:var(--bg2);padding:1px 6px;border-radius:4px;font-family:var(--mono)">{staff}</code> and <code style="background:var(--bg2);padding:1px 6px;border-radius:4px;font-family:var(--mono)">{ticket}</code> as placeholders.</p>
+
+        <!-- Add/Edit form -->
+        <div id="template-form" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:14px;color:var(--text2)" id="template-form-title">New Template</div>
+          <input type="hidden" id="template-edit-id" value="">
+          <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-bottom:10px">
+            <div class="field"><label>Title (shown in /template autocomplete)</label><input class="sinput" id="template-title" placeholder="e.g. Refund instructions" type="text"></div>
+            <div class="field"><label>Category</label><input class="sinput" id="template-category" placeholder="e.g. billing, general" type="text" value="general"></div>
+          </div>
+          <div class="field" style="margin-bottom:14px"><label>Message content</label><textarea class="sinput" id="template-content" placeholder="Write the canned reply here. {user}, {staff} and {ticket} will be replaced automatically." rows="5" style="resize:vertical;width:100%;box-sizing:border-box"></textarea></div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn sm primary" onclick="saveTemplate()">Save Template</button>
+            <button class="btn sm" onclick="hideTemplateForm()">Cancel</button>
+            <span id="template-form-st" style="font-size:12px;color:var(--text3)"></span>
+          </div>
+        </div>
+
+        <!-- Template list -->
+        <div id="template-list"><div style="color:var(--text3);font-size:13px">Loading…</div></div>
       </div>
 
       <!-- AI FAQ / Knowledge Base (admin only) -->
@@ -952,6 +1009,93 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
   background: var(--border);
 }
 
+
+/* Staff notes panel */
+.t-notes-section {
+  border-top: 1px solid var(--border);
+  padding: 14px 16px;
+  flex-shrink: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.t-notes-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #f59e0b;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.t-note-item {
+  background: rgba(245,158,11,.06);
+  border: 1px solid rgba(245,158,11,.18);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+.t-note-item:last-child { margin-bottom: 0; }
+.t-note-meta { font-size: 10px; color: var(--text3); margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+.t-note-del-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text3);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 2px;
+  line-height: 1;
+}
+.t-note-del-btn:hover { color: var(--red); }
+.t-note-text { font-size: 12px; color: var(--text); line-height: 1.5; white-space: pre-wrap; }
+.t-note-composer {
+  margin-top: 10px;
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+}
+.t-note-composer.open { display: flex; }
+.t-note-composer textarea {
+  background: var(--bg2);
+  border: 1px solid rgba(245,158,11,.3);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12.5px;
+  padding: 8px 10px;
+  resize: none;
+  outline: none;
+  min-height: 60px;
+  font-family: var(--sans);
+  line-height: 1.5;
+}
+.t-note-composer textarea:focus { border-color: rgba(245,158,11,.6); }
+.t-note-composer-row { display: flex; gap: 6px; align-items: center; }
+.t-note-save-btn {
+  padding: 5px 14px;
+  border-radius: 7px;
+  border: none;
+  background: rgba(245,158,11,.2);
+  color: #f59e0b;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .12s;
+}
+.t-note-save-btn:hover { background: rgba(245,158,11,.35); }
+.t-note-cancel-btn {
+  padding: 5px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text3);
+  font-size: 12px;
+  cursor: pointer;
+}
+
 /* Reply composer */
 #t-replybox {
   padding: 12px 16px 14px;
@@ -1142,6 +1286,18 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
           <div class="t-meta-label">Ticket Details</div>
           <div class="t-meta-row" style="color:var(--text3);font-size:12px">Loading…</div>
         </div>
+        <!-- Staff notes -->
+        <div class="t-notes-section" id="t-notes-panel">
+          <div class="t-notes-label">🔒 Staff Notes</div>
+          <div id="t-notes-list"><div style="font-size:11px;color:var(--text3)">No notes yet.</div></div>
+          <div class="t-note-composer" id="t-note-composer">
+            <textarea id="t-note-input" placeholder="Write an internal note…" rows="3"></textarea>
+            <div class="t-note-composer-row">
+              <button class="t-note-save-btn" onclick="submitNote()">Save note</button>
+              <button class="t-note-cancel-btn" onclick="toggleNoteComposer(false)">Cancel</button>
+            </div>
+          </div>
+        </div>
         <div class="t-actions" id="t-mfoot"></div>
       </div>
     </div>
@@ -1179,7 +1335,7 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
 let SERVERS = JSON.parse(localStorage.getItem('td_servers') || '[]');
 let CURRENT = parseInt(localStorage.getItem('td_current') || '0');
 let PUSH = { enabled: false, lastSeen: new Set(), timer: null };
-const S = { status:'all', page:1, archPage:1, archResults:[] };
+const S = { status:'all', page:1, archPage:1, archResults:[], notesPage:1 };
 const CANNED_REPLIES = [
   { label: 'Hälsning', text: 'Hej! 👋\n\nHur kan vi hjälpa dig idag?' },
   { label: 'Behöver info', text: 'Skulle du kunna ge oss lite mer info:\n- Vad hände?\n- När började det?\n- Skärmdumpar/felmeddelanden?\n\nTack!' },
@@ -1361,7 +1517,8 @@ function nav(p, btn) {
   if(btn) btn.classList.add('active');
   if(p==='stats')  loadStats();
   if(p==='staff')  loadStaff();
-  if(p==='settings'){ document.getElementById('set-url').value=currentServer()?.url||''; document.getElementById('set-token').value=currentServer()?.token||''; updatePushUI(); }
+  if(p==='notes')  _notesSearch();
+  if(p==='settings'){ document.getElementById('set-url').value=currentServer()?.url||''; document.getElementById('set-token').value=currentServer()?.token||''; updatePushUI(); loadTemplateList(); }
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
@@ -1471,20 +1628,25 @@ function setSt(s,btn) {
   loadTickets();
 }
 
+let ticketsLoadTimer;
+function loadTicketsDebounced(){ clearTimeout(ticketsLoadTimer); ticketsLoadTimer=setTimeout(loadTickets,350); }
+
 async function loadTickets() {
   const tbody=document.getElementById('t-tbody');
-  tbody.innerHTML=`<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:36px">Loading…</td></tr>`;
+  tbody.innerHTML=`<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:36px">Loading…</td></tr>`;
   try {
     const p=new URLSearchParams({page:S.page,limit:15});
     if(S.status!=='all') p.set('status',S.status);
     const pr=document.getElementById('f-prio')?.value, ca=document.getElementById('f-cat')?.value;
     if(pr) p.set('priority',pr); if(ca) p.set('category',ca);
+    const asg=document.getElementById('f-assigned')?.value.trim();
+    if(asg) p.set('assigned_to',asg);
     const data=await api('/api/tickets?'+p);
-    renderRows(data.data,'t-tbody',9);
+    renderRows(data.data,'t-tbody',10);
     renderPag('t-pag',data.pagination,n=>{S.page=n;loadTickets()});
     const nb=document.getElementById('ib-open');
     nb.textContent=data.pagination.total; nb.classList.toggle('show',data.pagination.total>0);
-  } catch(e){ tbody.innerHTML=`<tr><td colspan="9" style="text-align:center;color:var(--red);padding:36px">⚠ ${e.message}</td></tr>`; }
+  } catch(e){ tbody.innerHTML=`<tr><td colspan="10" style="text-align:center;color:var(--red);padding:36px">⚠ ${e.message}</td></tr>`; }
 }
 
 function renderRows(tickets, tbodyId, cols) {
@@ -1494,10 +1656,11 @@ function renderRows(tickets, tbodyId, cols) {
     <tr onclick="openTicket('${t.id}')">
       <td><span style="font-family:var(--mono);font-size:11px;color:var(--text3)">#${t.ticket_number}</span></td>
       <td><div style="font-weight:600">${esc(t.user_tag)}</div>${t.subject?`<div style="font-size:11px;color:var(--text3)">${esc(t.subject.slice(0,36))}</div>`:''}</td>
-      <td><span class="ctag">${t.category}</span></td>
+      <td><span class="ctag">${t.category}</span>${t.sla_breached&&(t.status==='Öppen'||t.status==='open')&&!t.first_response_at?'<span style="display:inline-block;margin-left:6px;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.3)">⚠ SLA</span>':''}</td>
       <td><span class="badge ${t.status}">${t.status}</span></td>
       <td><span class="pdot ${t.priority}"></span>${t.priority}</td>
       <td style="font-size:11px;color:var(--text3)">${t.claimed_by_tag||'—'}</td>
+      <td style="font-size:11px;color:var(--text3)">${t.assigned_to_tag?'📌 '+esc(t.assigned_to_tag):'—'}</td>
       <td style="font-size:11px;color:var(--text3);font-family:var(--mono)">${fd(t.opened_at)}</td>
       <td>${t.rating?mkStars(t.rating):'<span style="color:var(--text3);font-size:11px">—</span>'}</td>
       <td onclick="event.stopPropagation()">${(t.status==='open'||t.status==='Öppen')?`<button class="btn sm danger" onclick="quickClose('${t.id}')">Close</button>`:''}
@@ -1525,7 +1688,7 @@ async function _archSearch(){
       <tr onclick="openTicket('${t.id}')">
         <td><span style="font-family:var(--mono);font-size:11px;color:var(--text3)">#${t.ticket_number}</span></td>
         <td><div style="font-weight:600">${q?hilite(esc(t.user_tag),q):esc(t.user_tag)}</div>${t.subject?`<div style="font-size:11px;color:var(--text3)">${q?hilite(esc(t.subject.slice(0,40)),q):esc(t.subject.slice(0,40))}</div>`:''}</td>
-        <td><span class="ctag">${t.category}</span></td>
+        <td><span class="ctag">${t.category}</span>${t.sla_breached&&(t.status==='Öppen'||t.status==='open')&&!t.first_response_at?'<span style="display:inline-block;margin-left:6px;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.3)">⚠ SLA</span>':''}</td>
         <td><span class="badge ${t.status}">${t.status}</span></td>
         <td style="font-size:11px;font-family:var(--mono);color:var(--text3)">${fd(t.opened_at)}</td>
         <td style="font-size:11px;font-family:var(--mono);color:var(--text3)">${t.closed_at?fd(t.closed_at):'—'}</td>
@@ -1537,10 +1700,58 @@ async function _archSearch(){
 }
 function exportArchive(){ if(!S.archResults.length){toast('Run a search first','info');return;} dlCSV(S.archResults,'archive.csv'); }
 
+// ─── Staff Notes search ─────────────────────────────────────────────────────
+let notesTimer;
+function notesSearch(){ clearTimeout(notesTimer); notesTimer=setTimeout(_notesSearch,350); }
+async function _notesSearch(){
+  const q=document.getElementById('nq').value.trim(), tbody=document.getElementById('n-tbody');
+  tbody.innerHTML=`<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:36px">Searching…</td></tr>`;
+  try {
+    const p=new URLSearchParams({page:S.notesPage,limit:20});
+    if(q) p.set('q',q);
+    const data=await api('/api/tickets/notes/search?'+p);
+    if(!data.data.length){ tbody.innerHTML=`<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:36px">No notes found.</td></tr>`; document.getElementById('n-pag').innerHTML=''; return; }
+    tbody.innerHTML=data.data.map(n=>`
+      <tr onclick="openTicket('${n.ticket_id}')">
+        <td><span style="font-family:var(--mono);font-size:11px;color:var(--text3)">#${n.ticket_number ?? '—'}</span>${n.category?`<div style="font-size:11px;color:var(--text3)"><span class="ctag">${esc(n.category)}</span></div>`:''}</td>
+        <td>${q?hilite(esc(n.user_tag||'—'),q):esc(n.user_tag||'—')}</td>
+        <td style="font-size:12px">${q?hilite(esc(n.staff_tag||'Staff'),q):esc(n.staff_tag||'Staff')}${n.source==='discord'?' <span style="color:var(--text3);font-size:10px">(Discord)</span>':''}</td>
+        <td style="font-size:12px;max-width:360px;white-space:pre-wrap">${q?hilite(esc(n.note||''),q):esc(n.note||'')}</td>
+        <td style="font-size:11px;font-family:var(--mono);color:var(--text3)">${fd(n.created_at)}</td>
+      </tr>`).join('');
+    renderPag('n-pag',data.pagination,p=>{S.notesPage=p;_notesSearch()});
+  } catch(e){ tbody.innerHTML=`<tr><td colspan="5" style="text-align:center;color:var(--red);padding:36px">⚠ ${e.message}</td></tr>`; }
+}
+
+
 // ─── Stats ────────────────────────────────────────────────────────────────────
 async function loadStats(){
   try{
-    const [ov,daily]=await Promise.all([api('/api/stats'),api('/api/stats/daily?days=14')]);
+function renderSlaBreaches(rows) {
+  const panel = document.getElementById('sla-breach-panel');
+  const list  = document.getElementById('sla-breach-list');
+  const count = document.getElementById('sla-breach-count');
+  if (!panel || !list) return;
+  if (!rows.length) { panel.style.display='none'; return; }
+  panel.style.display='block';
+  count.textContent = rows.length + ' ticket' + (rows.length!==1?'s':'') + ' breached';
+  const fmt = m => m>=60 ? Math.floor(m/60)+'h '+(m%60)+'m' : m+'m';
+  list.innerHTML = rows.map(t => `
+    <div style="display:flex;align-items:center;gap:12px;padding:8px 10px;border-radius:8px;background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.15);margin-bottom:8px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600;color:var(--text)">#${t.ticket_number||'?'} — ${esc(t.subject||'(no subject)')}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px">${esc(t.user_tag||'?')} · <span class="ctag">${esc(t.category)}</span></div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-size:11px;font-weight:700;color:#f87171">+${fmt(t.minutes_overdue)} overdue</div>
+        <div style="font-size:10px;color:var(--text3)">SLA: ${t.sla_minutes}m</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+    const [ov,daily,slaData]=await Promise.all([api('/api/stats'),api('/api/stats/daily?days=14'),api('/api/tickets/sla-breaches').catch(()=>({data:[]}))]);
+    renderSlaBreaches(slaData.data||[]);
     const o=ov.overview;
     document.getElementById('as-all').textContent=o.total_all_time||'—';
     document.getElementById('as-wk').textContent=o.opened_today||'—';
@@ -1668,7 +1879,7 @@ async function openTicket(id){
 
 async function refreshTicketChat(id, silent=false){
   try {
-    const {ticket:t, logs, messages:msgs} = await api(`/api/tickets/${id}`);
+    const {ticket:t, logs, messages:msgs, notes} = await api(`/api/tickets/${id}`);
 
     // Title & status
     document.getElementById('t-mtitle').textContent = `Ticket #${t.ticket_number||'?'} — ${t.category||t.type||'?'}`;
@@ -1711,6 +1922,10 @@ async function refreshTicketChat(id, silent=false){
         <div class="t-meta-item">
           <div class="t-meta-key">Claimed by</div>
           <div class="t-meta-val">${esc(t.claimed_by_tag||'—')}</div>
+        </div>
+        <div class="t-meta-item">
+          <div class="t-meta-key">Assigned to</div>
+          <div class="t-meta-val">${t.assigned_to_tag?'📌 '+esc(t.assigned_to_tag):'—'}</div>
         </div>
         <div class="t-meta-item">
           <div class="t-meta-key">Opened</div>
@@ -1792,8 +2007,9 @@ async function refreshTicketChat(id, silent=false){
       <button class="t-action-btn" onclick="openTranscript('${id}')">📄 Transcript</button>
       <button class="t-action-btn" onclick="openTranscriptTxt('${id}')">🧾 Transcript .txt</button>
       <button class="t-action-btn" onclick="openTranscriptJson('${id}')">🧩 Transcript .json</button>
-      <button class="t-action-btn" onclick="addNote('${id}')">📝 Add Note</button>
+      <button class="t-action-btn" onclick="toggleNoteComposer(true)" style="border-color:rgba(245,158,11,.3);color:#f59e0b">🔒 Add Note</button>
       <button class="t-action-btn success" onclick="claimTk('${id}')">✋ Claim Ticket</button>
+      <button class="t-action-btn" onclick="assignTk('${id}')" style="border-color:rgba(99,102,241,.3);color:#818cf8">📌 Assign</button>
       <button class="t-action-btn primary" onclick="setPriority('${id}')">⚡ Set Priority</button>
       ${isOpen
         ? `<button class="t-action-btn danger" onclick="closeTk('${id}')">🔒 Close Ticket</button>`
@@ -1802,6 +2018,9 @@ async function refreshTicketChat(id, silent=false){
     `;
 
     document.getElementById('t-replybox').style.display = isOpen ? 'block' : 'none';
+
+    // ── Staff notes ──
+    renderNotes(notes||[]);
 
   } catch(e) {
     if (!silent) document.getElementById('t-messages').innerHTML = `<div class="t-empty-state"><div class="t-es-icon">⚠️</div><p style="color:var(--red)">${e.message}</p></div>`;
@@ -1838,8 +2057,63 @@ function closeTMD(){
 // ─── Actions ──────────────────────────────────────────────────────────────────
 async function quickClose(id){ if(!confirm('Close?')) return; try{ await api(`/api/tickets/${id}/close`,{method:'POST',body:{reason:'Closed via panel'}}); toast('Closed','ok'); loadTickets(); }catch(e){ toast(e.message,'err'); } }
 async function claimTk(id){ try{ await api(`/api/tickets/${id}/claim`,{method:'POST'}); toast('Claimed!','ok'); openTicket(id); loadTickets(); }catch(e){ toast(e.message,'err'); } }
+async function assignTk(id){
+  const tag=(prompt('Assign to (Discord tag or name):')||'').trim();
+  if(!tag) return;
+  try{ await api(`/api/tickets/${id}/assign`,{method:'POST',body:{assigned_to_tag:tag}}); toast('Assigned to '+tag,'ok'); openTicket(id); loadTickets(); }catch(e){ toast(e.message,'err'); }
+}
 async function closeTk(id){ const r=prompt('Close reason:')||''; try{ await api(`/api/tickets/${id}/close`,{method:'POST',body:{reason:r||'Closed via panel'}}); toast('Closed','ok'); closeTMD(); loadTickets(); }catch(e){ toast(e.message,'err'); } }
 async function reopenTk(id){ try{ await api(`/api/tickets/${id}`,{method:'PATCH',body:{status:'open'}}); toast('Re-opened','ok'); openTicket(id); loadTickets(); }catch(e){ toast(e.message,'err'); } }
+function renderNotes(notes) {
+  const list = document.getElementById('t-notes-list');
+  if (!list) return;
+  if (!notes.length) {
+    list.innerHTML = '<div style="font-size:11px;color:var(--text3)">No notes yet.</div>';
+    return;
+  }
+  list.innerHTML = notes.slice().reverse().map(n => `
+    <div class="t-note-item">
+      <div class="t-note-meta">${esc(n.staff_tag||'Staff')} · ${fd(n.created_at)} ${n.source==='discord'?'· via Discord':''}
+        <button class="t-note-del-btn" onclick="deleteNote('${_currentTicketId}',${n.id})" title="Delete note">🗑</button>
+      </div>
+      <div class="t-note-text">${esc(n.note||'')}</div>
+    </div>
+  `).join('');
+}
+
+async function deleteNote(ticketId, noteId) {
+  if (!confirm('Delete this note?')) return;
+  try {
+    await api(`/api/tickets/${ticketId}/note/${noteId}`, { method: 'DELETE' });
+    toast('Note deleted', 'ok');
+    refreshTicketChat(ticketId, true);
+  } catch(e) { toast(e.message, 'err'); }
+}
+
+function toggleNoteComposer(open) {
+  const c = document.getElementById('t-note-composer');
+  const inp = document.getElementById('t-note-input');
+  if (open) {
+    c.classList.add('open');
+    inp.value = '';
+    inp.focus();
+  } else {
+    c.classList.remove('open');
+  }
+}
+
+async function submitNote() {
+  const inp = document.getElementById('t-note-input');
+  const note = inp.value.trim();
+  if (!note || !_currentTicketId) return;
+  try {
+    await api(`/api/tickets/${_currentTicketId}/note`, { method: 'POST', body: { note } });
+    toast('Note saved', 'ok');
+    toggleNoteComposer(false);
+    refreshTicketChat(_currentTicketId, true);
+  } catch(e) { toast(e.message, 'err'); }
+}
+
 async function addNote(id){ const n=prompt('Internal note:'); if(!n) return; try{ await api(`/api/tickets/${id}/note`,{method:'POST',body:{note:n}}); toast('Note added','ok'); openTicket(id); }catch(e){ toast(e.message,'err'); } }
 async function setPriority(id){
   const p = (prompt('Priority (low / normal / urgent):','normal')||'').trim().toLowerCase();
@@ -2053,7 +2327,7 @@ function renderCats(cats) {
     <div style="display:flex;align-items:center;gap:12px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 16px">
       <div style="font-size:24px;width:36px;text-align:center">${c.emoji||'🎫'}</div>
       <div style="flex:1">
-        <div style="font-weight:600;color:var(--text)">${esc(c.name)}</div>
+        <div style="display:flex;align-items:center;gap:8px"><span style="font-weight:600;color:var(--text)">${esc(c.name)}</span>${c.sla_minutes?'<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;background:rgba(99,102,241,.12);color:#818cf8;border:1px solid rgba(99,102,241,.3)">⏱ '+c.sla_minutes+'m SLA</span>':''}</div>
         <div style="font-size:12px;color:var(--text3)">${esc(c.description||'No description')}</div>
         ${c.discord_category_id ? '<div style="font-size:11px;color:var(--text3);font-family:var(--mono);margin-top:2px">Discord ID: ' + c.discord_category_id + '</div>' : '<div style="font-size:11px;color:#f87171;margin-top:2px">⚠️ No Discord category ID set</div>'}
       </div>
@@ -2066,7 +2340,7 @@ function renderCats(cats) {
           <input type="checkbox" ${c.ai_enabled||c.ai_enabled===undefined?'checked':''} onchange="toggleCatAI(${c.id}, this.checked)" style="cursor:pointer;accent-color:#818cf8">
           <span style="color:${c.ai_enabled||c.ai_enabled===undefined?'#818cf8':'var(--text3)'}">🤖 AI</span>
         </label>
-        <button onclick="editCat(${c.id},'${esc(c.name)}','${esc(c.emoji||'')}','${esc(c.description||'')}','${c.discord_category_id||''}')" 
+        <button onclick="editCat(${c.id},'${esc(c.name)}','${esc(c.emoji||'')}','${esc(c.description||'')}','${c.discord_category_id||''}',${c.sla_minutes||''})" 
           style="background:none;border:1px solid var(--border);color:var(--text2);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px">Edit</button>
         <button onclick="deleteCat(${c.id},'${esc(c.name)}')" 
           style="background:none;border:1px solid rgba(248,113,113,.3);color:#f87171;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px">Delete</button>
@@ -2082,7 +2356,7 @@ function showAddCat() {
   document.getElementById('nc-emoji').focus();
 }
 
-function editCat(id, name, emoji, desc, catid) {
+function editCat(id, name, emoji, desc, catid, sla) {
   document.getElementById('edit-cat-form').style.display = 'block';
   document.getElementById('add-cat-form').style.display = 'none';
   document.getElementById('ec-id').value    = id;
@@ -2090,6 +2364,7 @@ function editCat(id, name, emoji, desc, catid) {
   document.getElementById('ec-emoji').value = emoji;
   document.getElementById('ec-desc').value  = desc;
   document.getElementById('ec-catid').value = catid;
+  document.getElementById('ec-sla').value   = sla || '';
   document.getElementById('edit-cat-msg').style.display = 'none';
   document.getElementById('edit-cat-form').scrollIntoView({ behavior: 'smooth' });
 }
@@ -2102,12 +2377,13 @@ async function createCat() {
   const description = document.getElementById('nc-desc').value.trim();
   const discord_category_id = document.getElementById('nc-catid').value.trim();
   const auto_create_discord = document.getElementById('nc-autodiscord')?.checked || false;
+  const sla_minutes = parseInt(document.getElementById('nc-sla').value) || null;
   if (!name) { msg.style.display='block'; msg.style.color='#f87171'; msg.textContent='Name is required'; return; }
   try {
     const res = await fetch(AUTO_URL + '/api/categories', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, emoji, description, discord_category_id, auto_create_discord })
+      body: JSON.stringify({ name, emoji, description, discord_category_id, auto_create_discord, sla_minutes })
     });
     const data = await res.json();
     if (res.ok) {
@@ -2116,6 +2392,7 @@ async function createCat() {
       document.getElementById('nc-emoji').value = '';
       document.getElementById('nc-desc').value = '';
       document.getElementById('nc-catid').value = '';
+      document.getElementById('nc-sla').value = '';
       setTimeout(() => { document.getElementById('add-cat-form').style.display='none'; loadCategories(); }, 1200);
     } else { msg.style.display='block'; msg.style.color='#f87171'; msg.textContent=data.error||'Failed'; }
   } catch(e) { msg.style.display='block'; msg.style.color='#f87171'; msg.textContent='Error: '+e.message; }
@@ -2129,11 +2406,12 @@ async function saveCat() {
   const emoji = document.getElementById('ec-emoji').value.trim();
   const description = document.getElementById('ec-desc').value.trim();
   const discord_category_id = document.getElementById('ec-catid').value.trim();
+  const sla_minutes = parseInt(document.getElementById('ec-sla').value) || null;
   try {
     const res = await fetch(AUTO_URL + '/api/categories/' + id, {
       method: 'PATCH',
       headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, emoji, description, discord_category_id })
+      body: JSON.stringify({ name, emoji, description, discord_category_id, sla_minutes })
     });
     const data = await res.json();
     if (res.ok) {
@@ -2356,6 +2634,116 @@ async function saveStaleSettings() {
 }
 
 document.querySelector('[data-page="categories"]')?.addEventListener('click', () => { setTimeout(loadCategories, 200); });
+
+// ─── Saved Reply Templates ─────────────────────────────────────────────────────
+let replyTemplates = [];
+
+async function loadTemplateList() {
+  const list = document.getElementById('template-list');
+  if (!list) return;
+  try {
+    replyTemplates = await api('/api/templates');
+    renderTemplateList();
+  } catch(e) {
+    list.innerHTML = '<div style="color:#f87171;font-size:13px">Failed to load: ' + e.message + '</div>';
+  }
+}
+
+function renderTemplateList() {
+  const list = document.getElementById('template-list');
+  if (!replyTemplates.length) {
+    list.innerHTML = '<div style="color:var(--text3);font-size:13px;text-align:center;padding:20px">No templates yet. Add one above — staff can send it with <code style="background:var(--bg2);padding:1px 6px;border-radius:4px">/template</code>.</div>';
+    return;
+  }
+  // Group by category
+  const groups = {};
+  replyTemplates.forEach(e => { (groups[e.category||'general'] = groups[e.category||'general']||[]).push(e); });
+  list.innerHTML = Object.entries(groups).map(([cat, items]) => `
+    <div style="margin-bottom:18px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:8px">${esc(cat)}</div>
+      ${items.map(e => `
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:8px;display:flex;align-items:flex-start;gap:12px">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+              <span style="font-size:13px;font-weight:600;color:var(--text)">${esc(e.title)}</span>
+              <span style="padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;${e.enabled?'background:rgba(52,211,153,.15);color:#34d399':'background:rgba(156,163,175,.15);color:var(--text3)'}">${e.enabled?'ACTIVE':'DISABLED'}</span>
+              ${e.usage_count ? `<span style="font-size:10px;color:var(--text3)">used ${e.usage_count}×</span>` : ''}
+            </div>
+            <div style="font-size:12px;color:var(--text2);white-space:pre-wrap;line-height:1.5;max-height:60px;overflow:hidden;text-overflow:ellipsis">${esc(e.content.slice(0,200))}${e.content.length>200?'…':''}</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <button class="btn sm" onclick="editTemplate(${e.id})" style="padding:4px 10px;font-size:11px">✏️ Edit</button>
+            <button class="btn sm" onclick="toggleTemplate(${e.id},${e.enabled?0:1})" style="padding:4px 10px;font-size:11px">${e.enabled?'Disable':'Enable'}</button>
+            <button class="btn sm" onclick="deleteTemplate(${e.id})" style="padding:4px 10px;font-size:11px;color:#f87171">🗑</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
+}
+
+function showTemplateForm(resetId) {
+  document.getElementById('template-edit-id').value = resetId || '';
+  document.getElementById('template-form-title').textContent = resetId ? 'Edit Template' : 'New Template';
+  if (!resetId) {
+    document.getElementById('template-title').value = '';
+    document.getElementById('template-content').value = '';
+    document.getElementById('template-category').value = 'general';
+  }
+  document.getElementById('template-form-st').textContent = '';
+  document.getElementById('template-form').style.display = 'block';
+  document.getElementById('template-title').focus();
+}
+
+function hideTemplateForm() {
+  document.getElementById('template-form').style.display = 'none';
+}
+
+function editTemplate(id) {
+  const e = replyTemplates.find(f => f.id === id);
+  if (!e) return;
+  document.getElementById('template-title').value    = e.title;
+  document.getElementById('template-content').value  = e.content;
+  document.getElementById('template-category').value = e.category || 'general';
+  showTemplateForm(id);
+}
+
+async function saveTemplate() {
+  const st       = document.getElementById('template-form-st');
+  const id       = document.getElementById('template-edit-id').value;
+  const title    = document.getElementById('template-title').value.trim();
+  const content  = document.getElementById('template-content').value.trim();
+  const category = document.getElementById('template-category').value.trim() || 'general';
+  if (!title || !content) { st.style.color='#f87171'; st.textContent='Title and content are required.'; return; }
+  st.style.color='var(--text3)'; st.textContent='Saving…';
+  try {
+    if (id) {
+      await api('/api/templates/' + id, { method: 'PUT', body: { title, content, category } });
+    } else {
+      await api('/api/templates', { method: 'POST', body: { title, content, category } });
+    }
+    st.style.color='var(--green)'; st.textContent='✓ Saved';
+    setTimeout(hideTemplateForm, 800);
+    await loadTemplateList();
+  } catch(e) {
+    st.style.color='#f87171'; st.textContent='✗ ' + e.message;
+  }
+}
+
+async function toggleTemplate(id, newEnabled) {
+  try {
+    await api('/api/templates/' + id, { method: 'PUT', body: { enabled: newEnabled } });
+    await loadTemplateList();
+  } catch(e) { toast('Failed: ' + e.message, 'err'); }
+}
+
+async function deleteTemplate(id) {
+  if (!confirm('Delete this template? Staff will no longer see it in /template.')) return;
+  try {
+    await api('/api/templates/' + id, { method: 'DELETE' });
+    await loadTemplateList();
+  } catch(e) { toast('Failed: ' + e.message, 'err'); }
+}
 
 // ─── AI FAQ / Knowledge Base ──────────────────────────────────────────────────
 let faqEntries = [];
