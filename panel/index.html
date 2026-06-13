@@ -364,6 +364,7 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
     <div class="icon-sep"></div>
     <button class="icon-btn"        data-page="categories" onclick="nav('categories',this)" data-tip="Categories">🗂️</button>
     <button class="icon-btn"        data-page="export"   onclick="nav('export',this)"   data-tip="Export">📤</button>
+    <button class="icon-btn"        data-page="panel-users" onclick="nav('panel-users',this)" data-tip="Panel Users">🔑</button>
     <button class="icon-btn"        data-page="settings" onclick="nav('settings',this)" data-tip="Settings" style="margin-top:auto">⚙️</button>
   </nav>
 
@@ -523,6 +524,45 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
         <div id="cats-list">
           <div style="color:var(--text3);text-align:center;padding:40px">Loading...</div>
         </div>
+      </div>
+    </div>
+
+    <!-- PANEL USERS -->
+    <div class="page" id="page-panel-users">
+      <div class="page-title">Panel Users</div>
+      <div class="table-wrap" style="padding:24px;margin-top:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+          <div style="color:var(--text2);font-size:13px">Manage who can log in to this admin panel and their access level.</div>
+          <button class="btn sm primary" onclick="showAddUserPage()">+ Add User</button>
+        </div>
+
+        <!-- Add user form -->
+        <div id="add-user-form-page" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:14px;color:var(--text2)">Create New Account</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+            <div class="field"><label>Username</label><input class="sinput" id="pnu-user" placeholder="username" type="text"></div>
+            <div class="field"><label>Password</label><input class="sinput" id="pnu-pass" placeholder="min 6 chars" type="password"></div>
+            <div class="field"><label>Display Name</label><input class="sinput" id="pnu-tag" placeholder="e.g. Staff Member" type="text"></div>
+            <div class="field"><label>Role</label>
+              <select class="sinput" id="pnu-role" style="background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-family:var(--sans);font-size:13px">
+                <option value="staff">Staff (view only)</option>
+                <option value="admin">Admin (full access)</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn sm primary" onclick="createUserPage()">Create Account</button>
+            <button class="btn sm" onclick="document.getElementById('add-user-form-page').style.display='none'" style="background:var(--surface2);border:1px solid var(--border)">Cancel</button>
+          </div>
+          <div id="add-user-msg-page" style="margin-top:10px;font-size:12px;display:none"></div>
+        </div>
+
+        <table class="tbl" style="width:100%">
+          <thead><tr>
+            <th>Username</th><th>Display Name</th><th>Role</th><th>Last Login</th><th style="text-align:right">Actions</th>
+          </tr></thead>
+          <tbody id="panel-users-tbody"><tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text3)">Loading...</td></tr></tbody>
+        </table>
       </div>
     </div>
 
@@ -1303,6 +1343,7 @@ function nav(p, btn) {
   if(btn) btn.classList.add('active');
   if(p==='stats')  loadStats();
   if(p==='staff')  loadStaff();
+  if(p==='panel-users') loadPanelUsers();
   if(p==='settings'){ document.getElementById('set-url').value=currentServer()?.url||''; document.getElementById('set-token').value=currentServer()?.token||''; updatePushUI(); }
 }
 
@@ -2194,10 +2235,93 @@ async function toggleRole(id, newRole) {
       body: JSON.stringify({ role: newRole })
     });
     loadUsers();
+    loadPanelUsers();
   } catch{}
 }
 
-function logout() {
+// ─── Panel Users Page ─────────────────────────────────────────────────────────
+async function loadPanelUsers() {
+  const tok = localStorage.getItem('td_bootstrap_token');
+  if (!tok) return;
+  const tbody = document.getElementById('panel-users-tbody');
+  try {
+    const res = await fetch(AUTO_URL + '/api/login/users', { headers: { Authorization: 'Bearer ' + tok } });
+    if (!res.ok) {
+      if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:#f87171">Access denied — admin only</td></tr>';
+      return;
+    }
+    const users = await res.json();
+    if (!users.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text3)">No users yet</td></tr>';
+      return;
+    }
+    tbody.innerHTML = users.map(u => `
+      <tr>
+        <td><b style="color:var(--text)">${esc(u.username)}</b></td>
+        <td style="color:var(--text2)">${u.discord_tag ? esc(u.discord_tag) : '&mdash;'}</td>
+        <td><span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;${u.role==='admin'?'background:rgba(99,102,241,.2);color:#818cf8':'background:rgba(52,211,153,.15);color:#34d399'}">${u.role.toUpperCase()}</span></td>
+        <td style="color:var(--text3);font-size:12px">${u.last_login ? new Date(u.last_login).toLocaleString('sv-SE') : 'Never'}</td>
+        <td style="text-align:right">
+          <button onclick="toggleRolePage(${u.id},'${u.role==='admin'?'staff':'admin'}')" style="background:none;border:1px solid var(--border);color:var(--text2);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;margin-right:6px">Make ${u.role==='admin'?'Staff':'Admin'}</button>
+          <button onclick="deleteUserPage(${u.id},'${esc(u.username)}')" style="background:none;border:1px solid rgba(248,113,113,.3);color:#f87171;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px">Remove</button>
+        </td>
+      </tr>
+    `).join('');
+  } catch(e) { if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:#f87171">Error loading users</td></tr>'; }
+}
+
+function showAddUserPage() {
+  document.getElementById('add-user-form-page').style.display = 'block';
+  document.getElementById('add-user-msg-page').style.display = 'none';
+  document.getElementById('pnu-user').focus();
+}
+
+async function createUserPage() {
+  const tok  = localStorage.getItem('td_bootstrap_token');
+  const user = document.getElementById('pnu-user').value.trim();
+  const pass = document.getElementById('pnu-pass').value;
+  const tag  = document.getElementById('pnu-tag').value.trim();
+  const role = document.getElementById('pnu-role').value;
+  const msg  = document.getElementById('add-user-msg-page');
+  msg.style.display = 'none';
+  if (!user || !pass) { msg.style.display='block'; msg.style.color='#f87171'; msg.textContent='Username and password required.'; return; }
+  try {
+    const res  = await fetch(AUTO_URL + '/api/login/users', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: user, password: pass, discord_tag: tag, role })
+    });
+    const data = await res.json();
+    if (!res.ok) { msg.style.display='block'; msg.style.color='#f87171'; msg.textContent=data.error||'Failed'; return; }
+    msg.style.display='block'; msg.style.color='#34d399'; msg.textContent='✅ Account created!';
+    document.getElementById('pnu-user').value='';
+    document.getElementById('pnu-pass').value='';
+    document.getElementById('pnu-tag').value='';
+    setTimeout(() => { document.getElementById('add-user-form-page').style.display='none'; loadPanelUsers(); }, 1200);
+  } catch(e) { msg.style.display='block'; msg.style.color='#f87171'; msg.textContent='Network error.'; }
+}
+
+async function deleteUserPage(id, username) {
+  if (!confirm(`Remove user "${username}"? This cannot be undone.`)) return;
+  const tok = localStorage.getItem('td_bootstrap_token');
+  try {
+    const res = await fetch(AUTO_URL + '/api/login/users/' + id, { method: 'DELETE', headers: { Authorization: 'Bearer ' + tok } });
+    if (res.ok) loadPanelUsers(); else { const d = await res.json(); alert(d.error||'Failed'); }
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function toggleRolePage(id, newRole) {
+  const tok = localStorage.getItem('td_bootstrap_token');
+  try {
+    await fetch(AUTO_URL + '/api/login/users/' + id, {
+      method:'PATCH', headers:{'Authorization':'Bearer '+tok,'Content-Type':'application/json'},
+      body: JSON.stringify({ role: newRole })
+    });
+    loadPanelUsers();
+  } catch{}
+}
+
+
   localStorage.removeItem('td_bootstrap_token');
   localStorage.removeItem('td_servers');
   localStorage.removeItem('td_current');

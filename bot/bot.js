@@ -18,6 +18,7 @@ const MOD_LOG_CHANNEL    = process.env.MOD_LOG_CHANNEL_ID;
 const GUILD_ID           = process.env.GUILD_ID;
 const DELETE_DELAY       = parseInt(process.env.TICKET_DELETE_DELAY_MS || '5000');
 const SUPPORT_ROLE_IDS   = (process.env.SUPPORT_ROLE_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+const ADMIN_ROLE_IDS     = (process.env.ADMIN_ROLE_IDS   || '').split(',').map(s => s.trim()).filter(Boolean);
 const SERVER_NAME        = process.env.SERVER_NAME || 'TicketDesk';
 const MAX_OPEN_TICKETS_PER_USER = Math.max(1, parseInt(process.env.MAX_OPEN_TICKETS_PER_USER || '5'));
 
@@ -828,17 +829,53 @@ client.on('interactionCreate', async interaction => {
       [ticketId, interaction.user.id, interaction.user.tag, 'note', noteText]
     ).catch(err => console.error('[Note] DB error:', err.message));
 
-    // Post a visible embed in the channel so all staff in the ticket can see it
+    // Create a private thread under the ticket channel for the note
+    const now = new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
+    let thread = null;
+    try {
+      thread = await interaction.channel.threads.create({
+        name: `📝 Anteckning · ${interaction.user.username} · ${now}`,
+        type: ChannelType.PrivateThread,
+        invitable: false,
+        reason: 'Staff note on ticket ' + ticketId.slice(0, 8),
+      });
+    } catch (err) {
+      console.warn('[Note] Private thread failed, trying public:', err.message);
+      try {
+        thread = await interaction.channel.threads.create({
+          name: `📝 Anteckning · ${interaction.user.username} · ${now}`,
+          type: ChannelType.PublicThread,
+          reason: 'Staff note on ticket ' + ticketId.slice(0, 8),
+        });
+      } catch (err2) {
+        console.error('[Note] Thread creation failed:', err2.message);
+      }
+    }
+
+    if (!thread) {
+      await interaction.editReply({ content: '❌ Kunde inte skapa en tråd. Kontrollera bot-behörigheter.' });
+      return;
+    }
+
     const noteEmbed = new EmbedBuilder()
       .setColor(0xf59e0b)
       .setTitle('📝 Intern anteckning')
       .setDescription(noteText)
       .addFields({ name: 'Av', value: interaction.user.toString(), inline: true })
-      .setFooter({ text: 'Denna anteckning är synlig för all staff · Ticket ' + ticketId.slice(0, 8) })
+      .setFooter({ text: 'Intern · Endast staff · Ticket ' + ticketId.slice(0, 8) })
       .setTimestamp();
 
-    await interaction.channel.send({ embeds: [noteEmbed] }).catch(() => {});
-    await interaction.editReply({ content: '✅ Anteckning tillagd och synlig för all staff.' });
+    await thread.send({ embeds: [noteEmbed] }).catch(() => {});
+
+    // Ping all staff roles so they get notified and gain access to the thread
+    const roleIds = [...new Set([...SUPPORT_ROLE_IDS, ...ADMIN_ROLE_IDS])].filter(Boolean);
+    if (roleIds.length) {
+      const ping = roleIds.map(id => `<@&${id}>`).join(' ');
+      await thread.send({ content: ping, allowedMentions: { roles: roleIds } }).catch(() => {});
+    }
+
+    // Reply immediately so the interaction does not time out
+    await interaction.editReply({ content: `✅ Anteckning skapad i tråden ${thread.toString()}` });
     await modLog(interaction.guild, { action: 'AddNote', actor: interaction.user, channel: interaction.channel, ticketId, reason: noteText });
     return;
   }
