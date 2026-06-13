@@ -1,6 +1,5 @@
 let groq = null;
-const MODEL        = 'llama-3.3-70b-versatile';
-const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+let MODEL = 'llama-3.3-70b-versatile';
 
 const SYSTEM = 'You are a helpful support assistant for a Discord server ticket system. '
   + 'Always reply in the SAME LANGUAGE the user wrote in (Swedish or English). '
@@ -12,16 +11,15 @@ try {
   const Groq = require('groq-sdk');
   if (process.env.GROQ_API_KEY) {
     groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-    console.log('[AI] ✅ Groq loaded (text: llama-3.3-70b | vision: llama-4-scout)');
+    console.log('[AI] Groq loaded (llama-3.3-70b)');
   } else {
-    console.log('[AI] ❌ GROQ_API_KEY not set — AI disabled');
+    console.log('[AI] GROQ_API_KEY not set — AI disabled');
   }
-} catch (err) {
-  console.log('[AI] ❌ groq-sdk failed to load:', err.message, '— run: npm install');
+} catch {
+  console.log('[AI] groq-sdk not installed — run: npm install groq-sdk');
 }
 
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const db = require('../db/pool');
 
 function enabled() { return !!groq; }
 
@@ -30,107 +28,23 @@ async function chat(messages, max_tokens = 300, temperature = 0.6) {
   return res.choices[0]?.message?.content?.trim() || null;
 }
 
-async function buildFaqContext() {
-  try {
-    const rows = await db('SELECT title, content FROM ai_faq WHERE enabled = 1 ORDER BY category, title');
-    if (!rows || rows.length === 0) { console.log('[AI] FAQ: no entries found'); return null; }
-    console.log('[AI] FAQ: loaded ' + rows.length + ' entries');
-    const lines = rows.map(r => `### ${r.title}\n${r.content}`).join('\n\n');
-    return '\n\n---\nKNOWLEDGE BASE (use this to answer if relevant):\n' + lines + '\n---';
-  } catch (err) {
-    console.error('[AI] FAQ load error:', err.message);
-    return null;
-  }
-}
-
-// ── Vision ────────────────────────────────────────────────────────────────────
-async function analyseImage(imageUrl) {
-  if (!groq) return null;
-  console.log('[AI] Analysing image:', imageUrl.slice(0, 60) + '...');
-  try {
-    const res = await groq.chat.completions.create({
-      model: VISION_MODEL,
-      max_tokens: 400,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'image_url', image_url: { url: imageUrl } },
-          {
-            type: 'text',
-            text: 'You are a support assistant. Describe what you see in this image in 2–4 sentences. '
-              + 'Focus on anything that looks like an error message, warning, game problem, or technical issue. '
-              + 'If you see text (e.g. error codes, log output), quote it exactly. '
-              + 'Be concise and objective. Do not greet or add commentary.',
-          },
-        ],
-      }],
-    });
-    const result = res.choices[0]?.message?.content?.trim() || null;
-    console.log('[AI] Image analysis done:', result ? result.slice(0, 80) + '...' : 'null');
-    return result;
-  } catch (err) {
-    console.error('[AI] analyseImage error:', err.message);
-    return null;
-  }
-}
-
-async function handleImageMessage(channel, imageUrl, senderTag) {
+async function suggestReply(channel, subject, description, type) {
   if (!groq) return;
   try {
-    const description = await analyseImage(imageUrl);
-    if (!description) return;
-    const embed = new EmbedBuilder()
-      .setColor(0x7c3aed)
-      .setTitle('🖼️ AI Image Analysis')
-      .setDescription(description)
-      .setThumbnail(imageUrl)
-      .setFooter({ text: 'Image sent by ' + senderTag + ' • 🐧 Penguin AI' });
-    await channel.send({ embeds: [embed] });
-    console.log('[AI] Image embed sent in', channel.name);
-  } catch (err) {
-    console.error('[AI] handleImageMessage error:', err.message);
-  }
-}
-
-// ── Suggest reply ─────────────────────────────────────────────────────────────
-async function suggestReply(channel, subject, description, type, imageDescriptions = []) {
-  if (!groq) { console.log('[AI] suggestReply skipped — groq not loaded'); return; }
-  console.log('[AI] suggestReply starting for ticket type:', type);
-  try {
-    const faqCtx = await buildFaqContext();
-    const systemPrompt = SYSTEM + faqCtx;
-
-    let userPrompt = 'A user opened a "' + type + '" ticket.\nSubject: ' + subject + '\nMessage: ' + description;
-    if (imageDescriptions.length > 0) {
-      userPrompt += '\n\nThe user also attached image(s). AI analysis:\n'
-        + imageDescriptions.map((d, i) => `Image ${i + 1}: ${d}`).join('\n');
-    }
-    userPrompt += '\n\nSuggest a helpful first response.';
-
-    console.log('[AI] Calling Groq API for suggestReply...');
     const text = await chat([
-      { role: 'system', content: systemPrompt },
-      { role: 'user',   content: userPrompt },
+      { role: 'system', content: SYSTEM },
+      { role: 'user',   content: 'A user opened a "' + type + '" ticket.\nSubject: ' + subject + '\nMessage: ' + description + '\n\nSuggest a helpful first response.' }
     ]);
-
-    if (!text) { console.log('[AI] suggestReply got empty response from Groq'); return; }
-    console.log('[AI] Got reply, sending embed...');
-
+    if (!text) return;
     const embed = new EmbedBuilder()
-      .setColor(0x5865f2)
-      .setTitle('🤖 AI Suggested Reply')
-      .setDescription(text)
-      .setFooter({ text: '🐧 Penguin AI • Review before sending!' });
+      .setColor(0x5865f2).setTitle('🤖 AI Suggested Reply').setDescription(text)
+      .setFooter({ text: 'Groq AI • Review before sending!' });
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('ai_send_' + channel.id).setLabel('Send This Reply').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('ai_dismiss').setLabel('Dismiss').setStyle(ButtonStyle.Secondary),
     );
     await channel.send({ embeds: [embed], components: [row] });
-    console.log('[AI] ✅ Suggested reply sent in', channel.name);
-  } catch (err) {
-    console.error('[AI] suggestReply error:', err.message);
-    console.error('[AI] Full error:', err);
-  }
+  } catch (err) { console.error('[AI] suggestReply:', err.message); }
 }
 
 async function detectPriority(subject, description) {
@@ -154,72 +68,7 @@ async function summarise(messages) {
       { role: 'system', content: 'Summarise support ticket conversations concisely. Reply in the same language.' },
       { role: 'user',   content: 'Summarise in 3-5 bullet points:\n\n' + transcript }
     ], 300, 0.4);
-  } catch (err) { console.error('[AI] summarise error:', err.message); return null; }
+  } catch (err) { console.error('[AI] summarise:', err.message); return null; }
 }
 
-async function rawChat(systemPrompt, userMessage, max_tokens = 300) {
-  if (!groq) return null;
-  try {
-    const res = await groq.chat.completions.create({
-      model: MODEL,
-      max_tokens,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user',   content: userMessage },
-      ],
-    });
-    return res.choices[0]?.message?.content?.trim() || null;
-  } catch (err) {
-    console.error('[AI] rawChat error:', err.message);
-    return null;
-  }
-}
-
-
-// ── Reply to follow-up messages inside a ticket channel ──────────────────────
-async function replyInTicket(channel, userMessage, senderTag) {
-  if (!groq) return;
-  console.log('[AI] replyInTicket triggered by', senderTag, ':', userMessage.slice(0, 60));
-  try {
-    const faqCtx = await buildFaqContext();
-    if (faqCtx === null) {
-      console.log('[AI] replyInTicket: FAQ table empty, skipping');
-      return;
-    }
-
-    const systemPrompt =
-      'You are a helpful support assistant for a Discord server ticket system. '
-      + 'Always reply in the SAME LANGUAGE the user wrote in (Swedish or English). '
-      + 'Be friendly, professional and concise. Keep replies under 150 words. '
-      + 'IMPORTANT: Only reply if the user message matches something in the knowledge base. '
-      + 'If you cannot find a relevant answer in the knowledge base, respond with exactly: NO_MATCH '
-      + 'Never make up information. Write the reply directly — no meta-commentary.'
-      + faqCtx;
-
-    const text = await chat([
-      { role: 'system', content: systemPrompt },
-      { role: 'user',   content: userMessage },
-    ]);
-
-    if (!text || text.trim() === 'NO_MATCH') {
-      console.log('[AI] replyInTicket: no FAQ match for:', userMessage.slice(0, 60));
-      return;
-    }
-
-    console.log('[AI] replyInTicket: sending FAQ-based reply in', channel.name);
-    const embed = new EmbedBuilder()
-      .setColor(0x5865f2)
-      .setTitle('🤖 AI Suggested Reply')
-      .setDescription(text)
-      .setFooter({ text: '🐧 Penguin AI • Review before sending!' });
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('ai_send_' + channel.id).setLabel('Send This Reply').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('ai_dismiss').setLabel('Dismiss').setStyle(ButtonStyle.Secondary),
-    );
-    await channel.send({ embeds: [embed], components: [row] });
-  } catch (err) {
-    console.error('[AI] replyInTicket error:', err.message);
-  }
-}
-
-module.exports = { enabled, suggestReply, detectPriority, summarise, analyseImage, handleImageMessage, rawChat, replyInTicket };
+module.exports = { enabled, suggestReply, detectPriority, summarise };

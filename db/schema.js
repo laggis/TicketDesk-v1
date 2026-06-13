@@ -57,16 +57,6 @@ async function setup() {
     performed_at DATETIME     DEFAULT CURRENT_TIMESTAMP
   ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
 
-  await db(`CREATE TABLE IF NOT EXISTS ticket_notes (
-    id           INT          AUTO_INCREMENT PRIMARY KEY,
-    ticket_id    VARCHAR(36)  NOT NULL,
-    staff_id     VARCHAR(20)  DEFAULT NULL,
-    staff_tag    VARCHAR(100) DEFAULT NULL,
-    note         TEXT         NOT NULL,
-    source       VARCHAR(20)  DEFAULT 'panel',
-    created_at   DATETIME     DEFAULT CURRENT_TIMESTAMP
-  ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
-
   await db(`CREATE TABLE IF NOT EXISTS banned_users (
     user_id   VARCHAR(20)  PRIMARY KEY,
     reason    TEXT         DEFAULT NULL,
@@ -139,40 +129,6 @@ async function setup() {
   await db("ALTER TABLE tickets MODIFY COLUMN ticket_number INT AUTO_INCREMENT").catch(()=>{});
   await db("ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS ai_enabled TINYINT(1) DEFAULT 1").catch(()=>{});
 
-
-  await db(`CREATE TABLE IF NOT EXISTS ai_faq (
-    id          INT AUTO_INCREMENT PRIMARY KEY,
-    title       VARCHAR(200) NOT NULL,
-    content     TEXT         NOT NULL,
-    category    VARCHAR(50)  DEFAULT 'general',
-    enabled     TINYINT(1)   DEFAULT 1,
-    created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP,
-    updated_at  DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
-
-
-  await db(`CREATE TABLE IF NOT EXISTS reply_templates (
-    id             INT          AUTO_INCREMENT PRIMARY KEY,
-    title          VARCHAR(100) NOT NULL,
-    content        TEXT         NOT NULL,
-    category       VARCHAR(50)  DEFAULT 'general',
-    shortcut       VARCHAR(50)  DEFAULT NULL,
-    enabled        TINYINT(1)   DEFAULT 1,
-    usage_count    INT          DEFAULT 0,
-    created_by_id  VARCHAR(20)  DEFAULT NULL,
-    created_by_tag VARCHAR(100) DEFAULT NULL,
-    created_at     DATETIME     DEFAULT CURRENT_TIMESTAMP,
-    updated_at     DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
-
-  await db(`CREATE TABLE IF NOT EXISTS ai_channels (
-    id          INT AUTO_INCREMENT PRIMARY KEY,
-    channel_id  VARCHAR(30)  NOT NULL UNIQUE,
-    channel_name VARCHAR(100) NOT NULL DEFAULT 'unknown',
-    enabled     TINYINT(1)   DEFAULT 1,
-    created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
-
   // Add any missing columns to existing tables (safe migrations)
   const migrations = [
     "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS pending_close TINYINT(1) DEFAULT 0",
@@ -185,12 +141,6 @@ async function setup() {
     "ALTER TABLE ticket_messages ADD COLUMN IF NOT EXISTS attachments TEXT DEFAULT NULL",
     "ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS color VARCHAR(7) DEFAULT '#6366f1'",
     "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS last_reminder_at DATETIME DEFAULT NULL",
-    "ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS sla_minutes INT DEFAULT NULL",
-    "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sla_breached TINYINT(1) DEFAULT 0",
-    "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS rating TINYINT DEFAULT NULL",
-    "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS csat_sent TINYINT(1) DEFAULT 0",
-    "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS assigned_to VARCHAR(20) DEFAULT NULL",
-    "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS assigned_to_tag VARCHAR(100) DEFAULT NULL",
   ];
   for (const m of migrations) {
     await db(m).catch(() => {}); // ignore if column already exists
@@ -208,31 +158,9 @@ async function setup() {
     "CREATE INDEX IF NOT EXISTS idx_logs_ticket_time ON ticket_logs(ticket_id, performed_at)",
     "CREATE INDEX IF NOT EXISTS idx_audit_time ON admin_audit_logs(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_audit_staff ON admin_audit_logs(staff_id, created_at)",
-    "CREATE INDEX IF NOT EXISTS idx_tickets_rating ON tickets(rating)",
-    "CREATE INDEX IF NOT EXISTS idx_tickets_sla ON tickets(sla_breached, status)",
-    "CREATE INDEX IF NOT EXISTS idx_notes_ticket ON ticket_notes(ticket_id, created_at)",
-    "CREATE INDEX IF NOT EXISTS idx_notes_created ON ticket_notes(created_at)",
-    "CREATE INDEX IF NOT EXISTS idx_templates_enabled ON reply_templates(enabled, category)",
-    "CREATE INDEX IF NOT EXISTS idx_tickets_assigned ON tickets(assigned_to)",
   ];
   for (const i of indexes) {
     await db(i).catch(() => {});
-  }
-
-  // One-time backfill: migrate legacy notes stored in ticket_logs (action='note')
-  // into the dedicated ticket_notes table so they're searchable from the panel.
-  const noteCount = await db('SELECT COUNT(*) as n FROM ticket_notes');
-  if (noteCount[0].n === 0) {
-    const legacy = await db("SELECT ticket_id, staff_id, staff_tag, details, performed_at FROM ticket_logs WHERE action = 'note' AND details IS NOT NULL AND details != ''");
-    if (legacy.length) {
-      for (const row of legacy) {
-        await db(
-          'INSERT INTO ticket_notes (ticket_id, staff_id, staff_tag, note, source, created_at) VALUES (?,?,?,?,?,?)',
-          [row.ticket_id, row.staff_id, row.staff_tag, row.details, 'discord', row.performed_at]
-        ).catch(() => {});
-      }
-      console.log(`[DB] Backfilled ${legacy.length} legacy note(s) into ticket_notes`);
-    }
   }
 
   console.log('[DB] All tables ready ✅');

@@ -44,7 +44,7 @@ async function audit(req, { action, ticketId = null, details = null } = {}) {
 router.get('/', authenticateToken, async (req, res, next) => {
   try {
     const {
-      status, category, priority, user_id, search, assigned_to,
+      status, category, priority, user_id, search,
       page = 1, limit = 20, sort = 'opened_at', order = 'DESC',
       date_from, date_to,
     } = req.query;
@@ -68,14 +68,6 @@ router.get('/', authenticateToken, async (req, res, next) => {
     if (category)  { where.push('t.category = ?'); params.push(category); }
     if (priority)  { where.push('t.priority = ?'); params.push(priority); }
     if (user_id)   { where.push('t.user_id = ?');  params.push(user_id); }
-    if (assigned_to) {
-      if (assigned_to === 'unassigned') {
-        where.push("(t.assigned_to IS NULL OR t.assigned_to = '')");
-      } else {
-        where.push('(t.assigned_to = ? OR t.assigned_to_tag = ?)');
-        params.push(assigned_to, assigned_to);
-      }
-    }
     if (date_from) { where.push('t.opened_at >= ?'); params.push(date_from); }
     if (date_to)   { where.push('t.opened_at <= ?'); params.push(date_to + ' 23:59:59'); }
     if (search) {
@@ -88,19 +80,12 @@ router.get('/', authenticateToken, async (req, res, next) => {
     const offset   = (parseInt(page) - 1) * parseInt(limit);
 
     const [[{ total }]] = await pool.query(
-      `SELECT COUNT(*) as total FROM tickets t LEFT JOIN ticket_categories tc ON LOWER(tc.name) = LOWER(t.category) ${whereStr}`,
+      `SELECT COUNT(*) as total FROM tickets t ${whereStr}`,
       params
     );
 
     const [tickets] = await pool.query(
-      `SELECT t.*, tc.sla_minutes,
-          CASE WHEN tc.sla_minutes IS NOT NULL AND t.first_response_at IS NULL
-               AND (t.status = 'Öppen' OR t.status = 'open')
-               AND TIMESTAMPDIFF(MINUTE, t.opened_at, NOW()) >= tc.sla_minutes
-               THEN 1 ELSE t.sla_breached END AS sla_breached
-        FROM tickets t
-        LEFT JOIN ticket_categories tc ON LOWER(tc.name) = LOWER(t.category)
-        ${whereStr} ORDER BY t.${safeSort} ${safeOrder} LIMIT ? OFFSET ?`,
+      `SELECT t.* FROM tickets t ${whereStr} ORDER BY t.${safeSort} ${safeOrder} LIMIT ? OFFSET ?`,
       [...params, parseInt(limit), offset]
     );
 
@@ -113,28 +98,6 @@ router.get('/', authenticateToken, async (req, res, next) => {
         total_pages: Math.ceil(total / parseInt(limit)),
       },
     });
-  } catch (err) { next(err); }
-});
-
-
-// GET /api/tickets/sla-breaches — open tickets that have breached their SLA
-router.get('/sla-breaches', authenticateToken, async (req, res, next) => {
-  try {
-    const [rows] = await pool.query(`
-      SELECT t.id, t.ticket_number, t.category, t.subject, t.user_tag, t.priority,
-             t.opened_at, t.first_response_at, t.sla_breached, t.channel_id,
-             tc.sla_minutes,
-             TIMESTAMPDIFF(MINUTE, t.opened_at, NOW()) AS minutes_open,
-             TIMESTAMPDIFF(MINUTE, t.opened_at, NOW()) - tc.sla_minutes AS minutes_overdue
-      FROM tickets t
-      JOIN ticket_categories tc ON LOWER(tc.name) = LOWER(t.category)
-      WHERE (t.status = 'Öppen' OR t.status = 'open')
-        AND tc.sla_minutes IS NOT NULL
-        AND t.first_response_at IS NULL
-        AND TIMESTAMPDIFF(MINUTE, t.opened_at, NOW()) >= tc.sla_minutes
-      ORDER BY minutes_overdue DESC
-    `);
-    res.json({ data: rows });
   } catch (err) { next(err); }
 });
 
@@ -152,19 +115,15 @@ router.get('/:id', authenticateToken, async (req, res, next) => {
       'SELECT * FROM ticket_logs WHERE ticket_id = ? ORDER BY performed_at DESC',
       [req.params.id]
     );
-    const [notes] = await pool.query(
-      'SELECT * FROM ticket_notes WHERE ticket_id = ? ORDER BY created_at DESC',
-      [req.params.id]
-    );
 
-    res.json({ ticket, messages, logs, notes });
+    res.json({ ticket, messages, logs });
   } catch (err) { next(err); }
 });
 
 // ─── PATCH /api/tickets/:id ────────────────────────────────────────────────────
 router.patch('/:id', authenticateToken, async (req, res, next) => {
   try {
-    const { status, priority, claimed_by, claimed_by_tag, assigned_to, assigned_to_tag } = req.body;
+    const { status, priority, claimed_by, claimed_by_tag } = req.body;
     const fields = [];
     const vals   = [];
 
@@ -172,8 +131,6 @@ router.patch('/:id', authenticateToken, async (req, res, next) => {
     if (priority)     { fields.push('priority = ?');     vals.push(priority); }
     if (claimed_by)   { fields.push('claimed_by = ?');   vals.push(claimed_by); }
     if (claimed_by_tag){ fields.push('claimed_by_tag = ?'); vals.push(claimed_by_tag); }
-    if (assigned_to !== undefined)     { fields.push('assigned_to = ?');     vals.push(assigned_to || null); }
-    if (assigned_to_tag !== undefined) { fields.push('assigned_to_tag = ?'); vals.push(assigned_to_tag || null); }
     if (status === 'closed' || status === 'Stängd') { fields.push('closed_at = NOW()'); }
 
     if (!fields.length) return res.status(400).json({ error: 'Nothing to update' });
@@ -231,101 +188,16 @@ router.post('/:id/claim', authenticateToken, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ─── POST /api/tickets/:id/assign ─────────────────────────────────────────────
-// Assign a ticket to a staff member from the panel (id/tag are display-only;
-// the in-Discord notification happens via the /assign slash command).
-router.post('/:id/assign', authenticateToken, async (req, res, next) => {
-  try {
-    const { assigned_to = null, assigned_to_tag } = req.body;
-    if (!assigned_to_tag || !assigned_to_tag.trim()) {
-      return res.status(400).json({ error: 'assigned_to_tag required' });
-    }
-    await pool.query(
-      'UPDATE tickets SET assigned_to = ?, assigned_to_tag = ? WHERE id = ?',
-      [assigned_to || null, assigned_to_tag.trim(), req.params.id]
-    );
-    await pool.query(
-      'INSERT INTO ticket_logs (ticket_id, staff_id, staff_tag, action, details) VALUES (?,?,?,?,?)',
-      [req.params.id, req.user.discord_id || req.user.id?.toString() || '0', req.user.discord_tag || req.user.username, 'assign', assigned_to_tag.trim()]
-    ).catch(() => {});
-    await audit(req, { action: 'ticket_assign', ticketId: req.params.id, details: { assigned_to_tag: assigned_to_tag.trim() } });
-    res.json({ ok: true });
-  } catch (err) { next(err); }
-});
-
 // ─── POST /api/tickets/:id/note ───────────────────────────────────────────────
 router.post('/:id/note', authenticateToken, async (req, res, next) => {
   try {
     const { note } = req.body;
-    if (!note || !note.trim()) return res.status(400).json({ error: 'note required' });
-
-    const [result] = await pool.query(
-      'INSERT INTO ticket_notes (ticket_id, staff_id, staff_tag, note, source) VALUES (?,?,?,?,?)',
-      [req.params.id, req.user.discord_id || req.user.id?.toString() || '0', req.user.discord_tag || req.user.username, note.trim(), 'panel']
-    );
+    if (!note) return res.status(400).json({ error: 'note required' });
     await pool.query(
       'INSERT INTO ticket_logs (ticket_id, staff_id, staff_tag, action, details) VALUES (?,?,?,?,?)',
-      [req.params.id, req.user.discord_id || req.user.id?.toString() || '0', req.user.discord_tag || req.user.username, 'note', note.trim()]
-    ).catch(() => {});
-    await audit(req, { action: 'ticket_note', ticketId: req.params.id });
-
-    res.json({ ok: true, id: result.insertId });
-  } catch (err) { next(err); }
-});
-
-// ─── DELETE /api/tickets/:id/note/:noteId ─────────────────────────────────────
-router.delete('/:id/note/:noteId', authenticateToken, async (req, res, next) => {
-  try {
-    const [[note]] = await pool.query('SELECT * FROM ticket_notes WHERE id = ? AND ticket_id = ?', [req.params.noteId, req.params.id]);
-    if (!note) return res.status(404).json({ error: 'Note not found' });
-
-    // Only the author or an admin can delete a note
-    const isAuthor = note.staff_id && req.user.discord_id && note.staff_id === req.user.discord_id;
-    if (!isAuthor && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Not allowed to delete this note' });
-    }
-
-    await pool.query('DELETE FROM ticket_notes WHERE id = ?', [req.params.noteId]);
-    await audit(req, { action: 'ticket_note_delete', ticketId: req.params.id, details: { noteId: req.params.noteId } });
+      [req.params.id, req.user.discord_id, req.user.discord_tag, 'note', note]
+    );
     res.json({ ok: true });
-  } catch (err) { next(err); }
-});
-
-// ─── GET /api/tickets/notes/search ────────────────────────────────────────────
-// Search staff notes across all tickets — used by the panel's note search.
-router.get('/notes/search', authenticateToken, async (req, res, next) => {
-  try {
-    const { q = '', page = 1, limit = 20 } = req.query;
-    const safeLimit = Math.min(100, Math.max(1, parseInt(limit) || 20));
-    const offset = (Math.max(1, parseInt(page) || 1) - 1) * safeLimit;
-
-    let where = [];
-    let params = [];
-    if (q && q.trim()) {
-      where.push('(n.note LIKE ? OR t.user_tag LIKE ? OR t.ticket_number LIKE ? OR n.staff_tag LIKE ?)');
-      const term = `%${q.trim()}%`;
-      params.push(term, term, term, term);
-    }
-    const whereStr = where.length ? 'WHERE ' + where.join(' AND ') : '';
-
-    const [[{ total }]] = await pool.query(
-      `SELECT COUNT(*) as total FROM ticket_notes n LEFT JOIN tickets t ON t.id = n.ticket_id ${whereStr}`,
-      params
-    );
-    const [notes] = await pool.query(
-      `SELECT n.*, t.ticket_number, t.subject, t.category, t.status AS ticket_status, t.user_tag
-       FROM ticket_notes n
-       LEFT JOIN tickets t ON t.id = n.ticket_id
-       ${whereStr}
-       ORDER BY n.created_at DESC
-       LIMIT ? OFFSET ?`,
-      [...params, safeLimit, offset]
-    );
-
-    res.json({
-      data: notes,
-      pagination: { page: parseInt(page) || 1, limit: safeLimit, total, total_pages: Math.ceil(total / safeLimit) },
-    });
   } catch (err) { next(err); }
 });
 

@@ -14,7 +14,7 @@ router.get('/', async (req, res, next) => {
 // POST /api/categories — admin: create (optionally auto-create Discord channel category)
 router.post('/', authenticateToken, requireAdmin, async (req, res, next) => {
   try {
-    const { name, emoji = '🎫', description = '', discord_category_id = null, color = '#6366f1', sort_order = 0, auto_create_discord = false, ai_enabled = 1, sla_minutes = null } = req.body;
+    const { name, emoji = '🎫', description = '', discord_category_id = null, color = '#6366f1', sort_order = 0, auto_create_discord = false, ai_enabled = 1 } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: 'Name required' });
 
     let catId = discord_category_id || null;
@@ -44,8 +44,8 @@ router.post('/', authenticateToken, requireAdmin, async (req, res, next) => {
     }
 
     const [result] = await db.pool.execute(
-      'INSERT INTO ticket_categories (name, emoji, description, discord_category_id, color, sort_order, ai_enabled, sla_minutes) VALUES (?,?,?,?,?,?,?,?)',
-      [name.trim(), emoji, description, catId, color, sort_order, ai_enabled ? 1 : 0, sla_minutes ? parseInt(sla_minutes) : null]
+      'INSERT INTO ticket_categories (name, emoji, description, discord_category_id, color, sort_order, ai_enabled) VALUES (?,?,?,?,?,?,?)',
+      [name.trim(), emoji, description, catId, color, sort_order, ai_enabled ? 1 : 0]
     );
 
     // Refresh panel embed automatically
@@ -64,7 +64,7 @@ router.post('/', authenticateToken, requireAdmin, async (req, res, next) => {
 // PATCH /api/categories/:id — admin: update
 router.patch('/:id', authenticateToken, requireAdmin, async (req, res, next) => {
   try {
-    const { name, emoji, description, discord_category_id, color, sort_order, enabled, ai_enabled, sla_minutes } = req.body;
+    const { name, emoji, description, discord_category_id, color, sort_order, enabled, ai_enabled } = req.body;
     const fields = [], vals = [];
     if (name               !== undefined) { fields.push('name=?');                vals.push(name); }
     if (emoji              !== undefined) { fields.push('emoji=?');               vals.push(emoji); }
@@ -74,7 +74,6 @@ router.patch('/:id', authenticateToken, requireAdmin, async (req, res, next) => 
     if (sort_order         !== undefined) { fields.push('sort_order=?');          vals.push(sort_order); }
     if (enabled            !== undefined) { fields.push('enabled=?');             vals.push(enabled ? 1 : 0); }
     if (ai_enabled         !== undefined) { fields.push('ai_enabled=?');          vals.push(ai_enabled ? 1 : 0); }
-    if (sla_minutes        !== undefined) { fields.push('sla_minutes=?');         vals.push(sla_minutes ? parseInt(sla_minutes) : null); }
     if (!fields.length) return res.status(400).json({ error: 'Nothing to update' });
     vals.push(req.params.id);
     await db('UPDATE ticket_categories SET ' + fields.join(',') + ' WHERE id=?', vals);
