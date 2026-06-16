@@ -52,9 +52,22 @@ async function startAPI() {
 
   // ── Panel static files ──────────────────────────────────────────────────────
   const panelDir = path.join(__dirname, '..', 'panel');
-  app.use(express.static(panelDir));
-  app.get('/login', (req, res) => res.sendFile(path.join(panelDir, 'login.html')));
-  app.get('*',      (req, res) => res.sendFile(path.join(panelDir, 'index.html')));
+  // Disable caching in development
+  app.use(express.static(panelDir, {
+    setHeaders: (res, path) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  }));
+  app.get('/login', (req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.sendFile(path.join(panelDir, 'login.html'));
+  });
+  app.get('*', (req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.sendFile(path.join(panelDir, 'index.html'));
+  });
 
   app.use(errorHandler);
 

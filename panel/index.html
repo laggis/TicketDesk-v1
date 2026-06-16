@@ -1344,6 +1344,7 @@ function nav(p, btn) {
   if(p==='stats')  loadStats();
   if(p==='staff')  loadStaff();
   if(p==='panel-users') loadPanelUsers();
+  if(p==='categories') loadCategories();
   if(p==='settings'){ document.getElementById('set-url').value=currentServer()?.url||''; document.getElementById('set-token').value=currentServer()?.token||''; updatePushUI(); }
 }
 
@@ -2321,7 +2322,7 @@ async function toggleRolePage(id, newRole) {
   } catch{}
 }
 
-
+function logout() {
   localStorage.removeItem('td_bootstrap_token');
   localStorage.removeItem('td_servers');
   localStorage.removeItem('td_current');
