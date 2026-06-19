@@ -4,6 +4,7 @@ const pool    = require('../../db/pool');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 const { rateLimit } = require('../middleware/rateLimit');
 const ai = require('../../bot/ai');
+const { loadSettings } = require('./settings');
 
 function escHtml(s) {
   return String(s || '')
@@ -99,6 +100,42 @@ router.get('/', authenticateToken, async (req, res, next) => {
         total_pages: Math.ceil(total / parseInt(limit)),
       },
     });
+  } catch (err) { next(err); }
+});
+
+// ─── GET /api/tickets/stale ────────────────────────────────────────────────────
+// Tickets where the customer has been waiting longer than the stale-reminder/SLA threshold.
+// This is used by browser notifications in the panel and does not send anything to Discord.
+router.get('/stale', authenticateToken, async (req, res, next) => {
+  try {
+    const cfg = loadSettings();
+    const limit = Math.max(1, Math.min(parseInt(req.query.limit, 10) || 10, 50));
+    const threshold = Math.max(1, parseInt(cfg.staleTicketMinutes, 10) || 30);
+
+    if (!cfg.staleRemindersEnabled) {
+      return res.json({ data: [], settings: { enabled: false, staleTicketMinutes: threshold } });
+    }
+
+    const [rows] = await pool.query(`
+      SELECT t.*,
+        (SELECT sent_at  FROM ticket_messages WHERE ticket_id = t.id ORDER BY sent_at DESC, id DESC LIMIT 1) AS last_msg_at,
+        (SELECT is_staff FROM ticket_messages WHERE ticket_id = t.id ORDER BY sent_at DESC, id DESC LIMIT 1) AS last_msg_is_staff,
+        TIMESTAMPDIFF(MINUTE,
+          COALESCE((SELECT sent_at FROM ticket_messages WHERE ticket_id = t.id ORDER BY sent_at DESC, id DESC LIMIT 1), t.opened_at),
+          NOW()
+        ) AS waiting_minutes
+      FROM tickets t
+      WHERE (t.status = 'Öppen' OR t.status = 'open') AND t.channel_id IS NOT NULL
+      ORDER BY waiting_minutes DESC
+      LIMIT 200
+    `);
+
+    const stale = rows
+      .filter(t => Number(t.last_msg_is_staff || 0) !== 1)
+      .filter(t => Number(t.waiting_minutes || 0) >= threshold)
+      .slice(0, limit);
+
+    res.json({ data: stale, settings: { enabled: true, staleTicketMinutes: threshold } });
   } catch (err) { next(err); }
 });
 

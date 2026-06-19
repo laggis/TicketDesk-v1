@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS `tickets` (
   `priority`            VARCHAR(10)   DEFAULT 'normal',
   `subject`             VARCHAR(255)  DEFAULT NULL,
   `description`         TEXT          DEFAULT NULL,
+  `email`               VARCHAR(255)  DEFAULT NULL,
   `user_id`             VARCHAR(20)   DEFAULT NULL,
   `user_tag`            VARCHAR(100)  DEFAULT NULL,
   `created_by`          VARCHAR(100)  DEFAULT NULL,
@@ -50,6 +51,7 @@ CREATE TABLE IF NOT EXISTS `tickets` (
   `transcript_url`      VARCHAR(500)  DEFAULT NULL,
   `rating`              TINYINT       DEFAULT NULL,
   `first_response_at`   DATETIME      DEFAULT NULL,
+  `last_reminder_at`    DATETIME      DEFAULT NULL,
   `opened_at`           DATETIME      DEFAULT CURRENT_TIMESTAMP,
   `closed_at`           DATETIME      DEFAULT NULL,
   PRIMARY KEY (`id`),
@@ -71,6 +73,7 @@ CREATE TABLE IF NOT EXISTS `ticket_messages` (
   `avatar_url`     VARCHAR(500)  DEFAULT NULL,
   `is_staff`       TINYINT(1)    DEFAULT 0,
   `content`        TEXT          DEFAULT NULL,
+  `attachments`    TEXT          DEFAULT NULL,
   `sent_at`        DATETIME      DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   INDEX `idx_ticket` (`ticket_id`),
@@ -143,6 +146,24 @@ CREATE TABLE IF NOT EXISTS `admin_users` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ─────────────────────────────────────────────────────────────────────
+--  admin_audit_logs
+-- ─────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `admin_audit_logs` (
+  `id`         INT          NOT NULL AUTO_INCREMENT,
+  `staff_id`   VARCHAR(20)  DEFAULT NULL,
+  `staff_tag`  VARCHAR(100) DEFAULT NULL,
+  `action`     VARCHAR(100) DEFAULT NULL,
+  `ticket_id`  VARCHAR(36)  DEFAULT NULL,
+  `ip`         VARCHAR(100) DEFAULT NULL,
+  `user_agent` VARCHAR(500) DEFAULT NULL,
+  `details`    TEXT         DEFAULT NULL,
+  `created_at` DATETIME     DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  INDEX `idx_audit_time` (`created_at`),
+  INDEX `idx_audit_staff` (`staff_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─────────────────────────────────────────────────────────────────────
 --  panel_config
 -- ─────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS `panel_config` (
@@ -170,6 +191,59 @@ CREATE TABLE IF NOT EXISTS `ticket_categories` (
   `created_at`          DATETIME      DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `unique_name` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─────────────────────────────────────────────────────────────────────
+--  reply_templates
+-- ─────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `reply_templates` (
+  `id`             INT          NOT NULL AUTO_INCREMENT,
+  `label`          VARCHAR(100) DEFAULT NULL,
+  `text`           TEXT         DEFAULT NULL,
+  `title`          VARCHAR(100) DEFAULT NULL,
+  `content`        TEXT         DEFAULT NULL,
+  `category`       VARCHAR(50)  DEFAULT 'General',
+  `shortcut`       VARCHAR(50)  DEFAULT NULL,
+  `sort_order`     INT          DEFAULT 0,
+  `enabled`        TINYINT(1)   DEFAULT 1,
+  `created_by_id`  VARCHAR(20)  DEFAULT NULL,
+  `created_by_tag` VARCHAR(100) DEFAULT NULL,
+  `created_at`     DATETIME     DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`     DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  INDEX `idx_reply_templates_enabled` (`enabled`),
+  INDEX `idx_reply_templates_category` (`category`),
+  INDEX `idx_reply_templates_shortcut` (`shortcut`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─────────────────────────────────────────────────────────────────────
+--  ai_channels
+-- ─────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `ai_channels` (
+  `id`           INT          NOT NULL AUTO_INCREMENT,
+  `channel_id`   VARCHAR(20)  NOT NULL,
+  `channel_name` VARCHAR(100) DEFAULT 'unknown',
+  `enabled`      TINYINT(1)   DEFAULT 1,
+  `created_at`   DATETIME     DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`   DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `unique_channel_id` (`channel_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─────────────────────────────────────────────────────────────────────
+--  ai_faq
+-- ─────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `ai_faq` (
+  `id`         INT          NOT NULL AUTO_INCREMENT,
+  `title`      VARCHAR(120) NOT NULL,
+  `content`    TEXT         NOT NULL,
+  `category`   VARCHAR(50)  DEFAULT 'general',
+  `enabled`    TINYINT(1)   DEFAULT 1,
+  `created_at` DATETIME     DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  INDEX `idx_ai_faq_enabled` (`enabled`),
+  INDEX `idx_ai_faq_category` (`category`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ─────────────────────────────────────────────────────────────────────
@@ -203,6 +277,33 @@ WHERE NOT EXISTS (SELECT 1 FROM `ticket_categories` WHERE name = 'Övrigt') LIMI
 INSERT INTO `ticket_categories` (`name`, `emoji`, `description`, `sort_order`, `ai_enabled`)
 SELECT * FROM (SELECT 'Panel', '🎤', 'Paneldiskussioner', 4, 0) AS tmp
 WHERE NOT EXISTS (SELECT 1 FROM `ticket_categories` WHERE name = 'Panel') LIMIT 1;
+
+-- ─────────────────────────────────────────────────────────────────────
+--  Seed default reply templates (only if table is empty)
+-- ─────────────────────────────────────────────────────────────────────
+INSERT INTO `reply_templates` (`label`, `text`, `title`, `content`, `category`, `sort_order`, `enabled`)
+SELECT * FROM (SELECT 'Hälsning', 'Hej! 👋\n\nHur kan vi hjälpa dig idag?', 'Hälsning', 'Hej! 👋\n\nHur kan vi hjälpa dig idag?', 'General', 10, 1) AS tmp
+WHERE NOT EXISTS (SELECT 1 FROM `reply_templates`) LIMIT 1;
+
+INSERT INTO `reply_templates` (`label`, `text`, `title`, `content`, `category`, `sort_order`, `enabled`)
+SELECT * FROM (SELECT 'Behöver info', 'Skulle du kunna ge oss lite mer info:\n- Vad hände?\n- När började det?\n- Skärmdumpar/felmeddelanden?\n\nTack!', 'Behöver info', 'Skulle du kunna ge oss lite mer info:\n- Vad hände?\n- När började det?\n- Skärmdumpar/felmeddelanden?\n\nTack!', 'General', 20, 1) AS tmp
+WHERE NOT EXISTS (SELECT 1 FROM `reply_templates` WHERE `label` = 'Behöver info') LIMIT 1;
+
+INSERT INTO `reply_templates` (`label`, `text`, `title`, `content`, `category`, `sort_order`, `enabled`)
+SELECT * FROM (SELECT 'Jobbar på det', 'Tack för ditt tålamod — vi tittar på detta nu och återkommer till dig så snart vi kan.', 'Jobbar på det', 'Tack för ditt tålamod — vi tittar på detta nu och återkommer till dig så snart vi kan.', 'General', 30, 1) AS tmp
+WHERE NOT EXISTS (SELECT 1 FROM `reply_templates` WHERE `label` = 'Jobbar på det') LIMIT 1;
+
+INSERT INTO `reply_templates` (`label`, `text`, `title`, `content`, `category`, `sort_order`, `enabled`)
+SELECT * FROM (SELECT 'Löst', 'Detta bör nu vara löst. Om problemet kvarstår, svara här så hjälper vi dig vidare.', 'Löst', 'Detta bör nu vara löst. Om problemet kvarstår, svara här så hjälper vi dig vidare.', 'General', 40, 1) AS tmp
+WHERE NOT EXISTS (SELECT 1 FROM `reply_templates` WHERE `label` = 'Löst') LIMIT 1;
+
+-- ─────────────────────────────────────────────────────────────────────
+--  Safe migrations for existing databases
+-- ─────────────────────────────────────────────────────────────────────
+ALTER TABLE `tickets` ADD COLUMN IF NOT EXISTS `email` VARCHAR(255) DEFAULT NULL;
+ALTER TABLE `tickets` ADD COLUMN IF NOT EXISTS `last_reminder_at` DATETIME DEFAULT NULL;
+ALTER TABLE `ticket_messages` ADD COLUMN IF NOT EXISTS `attachments` TEXT DEFAULT NULL;
+ALTER TABLE `ticket_categories` ADD COLUMN IF NOT EXISTS `ai_enabled` TINYINT(1) DEFAULT 1;
 
 SET FOREIGN_KEY_CHECKS = 1;
 

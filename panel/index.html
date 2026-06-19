@@ -673,15 +673,15 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
             <div style="font-size:12px;color:var(--text3);margin-top:3px">Ping staff in the ticket channel when a customer has been waiting too long for a reply.</div>
           </div>
           <!-- Toggle -->
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none">
-            <div style="position:relative">
-              <input type="checkbox" id="stale-enabled-chk" style="opacity:0;position:absolute;width:0;height:0" onchange="onStaleToggle()">
-              <div id="stale-toggle-track" style="width:44px;height:24px;border-radius:12px;background:var(--surface2);border:1px solid var(--border);transition:background .2s;cursor:pointer" onclick="document.getElementById('stale-enabled-chk').click()">
-                <div id="stale-toggle-thumb" style="position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#888;transition:transform .2s,background .2s"></div>
-              </div>
-            </div>
+          <div style="display:flex;align-items:center;gap:8px;user-select:none">
+            <input type="checkbox" id="stale-enabled-chk" style="position:absolute;opacity:0;pointer-events:none" aria-hidden="true">
+            <button type="button" id="stale-toggle-btn" onclick="toggleStaleReminders(event)" aria-pressed="false" title="Enable or disable stale ticket reminders" style="position:relative;width:44px;height:24px;border:0;background:transparent;padding:0;cursor:pointer">
+              <span id="stale-toggle-track" style="display:block;position:relative;width:44px;height:24px;border-radius:12px;background:var(--surface2);border:1px solid var(--border);transition:background .2s">
+                <span id="stale-toggle-thumb" style="position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#888;transition:transform .2s,background .2s"></span>
+              </span>
+            </button>
             <span id="stale-toggle-label" style="font-size:12px;color:var(--text2);min-width:44px">Off</span>
-          </label>
+          </div>
         </div>
 
         <div id="stale-settings-fields" style="display:flex;flex-direction:column;gap:12px">
@@ -1277,7 +1277,7 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
 // ─── State ────────────────────────────────────────────────────────────────────
 let SERVERS = JSON.parse(localStorage.getItem('td_servers') || '[]');
 let CURRENT = parseInt(localStorage.getItem('td_current') || '0');
-let PUSH = { enabled: false, lastSeen: new Set(), timer: null };
+let PUSH = { enabled: localStorage.getItem('td_push_enabled') === '1', lastSeen: new Set(), timer: null };
 const S = { status:'all', page:1, archPage:1, archResults:[] };
 const DEFAULT_CANNED_REPLIES = [
   { label: 'Hälsning', text: 'Hej! 👋\n\nHur kan vi hjälpa dig idag?' },
@@ -1465,7 +1465,7 @@ function nav(p, btn) {
   if(p==='categories') loadCategories();
   if(p==='templates') loadTemplates();
   if(p==='ai') loadAiTools();
-  if(p==='settings'){ document.getElementById('set-url').value=currentServer()?.url||''; document.getElementById('set-token').value=currentServer()?.token||''; updatePushUI(); }
+  if(p==='settings'){ document.getElementById('set-url').value=currentServer()?.url||''; document.getElementById('set-token').value=currentServer()?.token||''; updatePushUI(); loadUsers(); loadStaleSettings(); loadSmtpSettings(); }
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
@@ -1511,30 +1511,90 @@ function copyToken() {
 }
 
 // ─── Push Notifications ───────────────────────────────────────────────────────
-function updatePushUI() {
-  const perm = Notification?.permission;
-  const btn  = document.getElementById('push-btn');
-  const txt  = document.getElementById('push-status-text');
-  if (perm==='granted') {
-    btn.textContent='✓ Enabled'; btn.disabled=true;
-    txt.textContent='Browser notifications are enabled. You\'ll be pinged for urgent tickets and SLA breaches.';
-    PUSH.enabled=true; if(!PUSH.timer) startPushPolling();
-  } else if (perm==='denied') {
-    btn.textContent='Blocked'; btn.disabled=true;
-    txt.textContent='Notifications are blocked. Enable them in your browser\'s site settings.';
+function browserNotificationsSupported() {
+  return typeof window !== 'undefined' && 'Notification' in window;
+}
+
+function setPushEnabled(enabled, showToast = true) {
+  PUSH.enabled = !!enabled && browserNotificationsSupported() && Notification.permission === 'granted';
+  localStorage.setItem('td_push_enabled', PUSH.enabled ? '1' : '0');
+
+  if (PUSH.enabled) {
+    startPushPolling();
+    if (showToast) toast('Notifications enabled! 🔔', 'ok');
+  } else {
+    if (PUSH.timer) clearInterval(PUSH.timer);
+    PUSH.timer = null;
+    if (showToast) toast('Panel notifications disabled', 'info');
   }
+  updatePushUI();
+}
+
+function updatePushUI() {
+  const btn = document.getElementById('push-btn');
+  const txt = document.getElementById('push-status-text');
+  if (!btn || !txt) return;
+
+  if (!browserNotificationsSupported()) {
+    btn.textContent = 'Not supported';
+    btn.disabled = true;
+    txt.textContent = 'Browser notifications are not supported in this browser.';
+    return;
+  }
+
+  const perm = Notification.permission;
+  btn.disabled = false;
+
+  if (perm === 'granted') {
+    if (PUSH.enabled) {
+      btn.textContent = 'Disable';
+      txt.textContent = 'Browser notifications are enabled. Click Disable to stop panel notifications on this device.';
+      if (!PUSH.timer) startPushPolling();
+    } else {
+      btn.textContent = 'Enable';
+      txt.textContent = 'Browser permission is allowed, but TicketDesk panel notifications are disabled on this device.';
+      if (PUSH.timer) { clearInterval(PUSH.timer); PUSH.timer = null; }
+    }
+    return;
+  }
+
+  if (perm === 'denied') {
+    PUSH.enabled = false;
+    localStorage.setItem('td_push_enabled', '0');
+    if (PUSH.timer) { clearInterval(PUSH.timer); PUSH.timer = null; }
+    btn.textContent = 'Blocked';
+    btn.disabled = true;
+    txt.textContent = 'Notifications are blocked. Enable them in your browser site settings, then refresh this page.';
+    return;
+  }
+
+  btn.textContent = 'Enable';
+  txt.textContent = 'Enable browser notifications to get pinged when urgent tickets come in — even with this tab in the background.';
 }
 
 async function requestPush() {
-  if (!('Notification' in window)) { toast('Notifications not supported in this browser','err'); return; }
+  if (!browserNotificationsSupported()) {
+    toast('Notifications not supported in this browser', 'err');
+    return;
+  }
+
+  // Permission already granted: this button becomes a real local on/off switch.
+  if (Notification.permission === 'granted') {
+    setPushEnabled(!PUSH.enabled);
+    return;
+  }
+
   const perm = await Notification.requestPermission();
-  PUSH.enabled = perm==='granted';
-  updatePushUI();
-  if (PUSH.enabled) { toast('Notifications enabled! 🔔','ok'); startPushPolling(); }
-  else toast('Permission denied','err');
+  if (perm === 'granted') setPushEnabled(true);
+  else {
+    setPushEnabled(false, false);
+    updatePushUI();
+    toast(perm === 'denied' ? 'Permission blocked in browser' : 'Permission not granted', 'err');
+  }
 }
 
 function startPushPolling() {
+  if (!browserNotificationsSupported() || Notification.permission !== 'granted' || !PUSH.enabled) return;
   if (PUSH.timer) clearInterval(PUSH.timer);
   PUSH.timer = setInterval(pollUrgent, 30000);
   pollUrgent();
@@ -1543,13 +1603,29 @@ function startPushPolling() {
 async function pollUrgent() {
   if (!PUSH.enabled || !currentServer()) return;
   try {
-    const data = await api('/api/tickets?status=open&priority=urgent&limit=5&sort=opened_at&order=DESC');
-    for (const t of data.data||[]) {
+    const [urgent, stale] = await Promise.all([
+      api('/api/tickets?status=open&priority=urgent&limit=5&sort=opened_at&order=DESC'),
+      api('/api/tickets/stale?limit=5').catch(() => ({ data: [] })),
+    ]);
+
+    for (const t of urgent.data||[]) {
       const key = 'u'+t.id;
       if (PUSH.lastSeen.has(key)) continue;
       if (PUSH.lastSeen.size > 0) { // skip first load
         firePush(`🔴 Urgent Ticket #${t.ticket_number}`, `${t.user_tag} — ${t.category}`, t.id);
-        document.getElementById('notif-dot').classList.add('show');
+        document.getElementById('notif-dot')?.classList.add('show');
+      }
+      PUSH.lastSeen.add(key);
+    }
+
+    for (const t of stale.data||[]) {
+      const key = 's'+t.id;
+      if (PUSH.lastSeen.has(key)) continue;
+      if (PUSH.lastSeen.size > 0) { // skip first load
+        const waited = Number(t.waiting_minutes || 0);
+        const waitedLabel = waited >= 60 ? `${Math.floor(waited / 60)}h ${waited % 60}m` : `${waited}m`;
+        firePush(`⏰ Ticket #${t.ticket_number} needs reply`, `${t.user_tag || 'Customer'} has waited ${waitedLabel}`, t.id);
+        document.getElementById('notif-dot')?.classList.add('show');
       }
       PUSH.lastSeen.add(key);
     }
@@ -1558,13 +1634,13 @@ async function pollUrgent() {
 
 function firePush(title, body, ticketId) {
   toast(title + ': ' + body, 'info');
-  if (document.hidden) {
+  if (document.hidden && browserNotificationsSupported() && Notification.permission === 'granted' && PUSH.enabled) {
     const n = new Notification(title, { body, icon:'/favicon.ico', requireInteraction:true });
     n.onclick = () => { window.focus(); if(ticketId) openTicket(ticketId); };
   }
 }
 function toggleNotifPanel() {
-  document.getElementById('notif-dot').classList.remove('show');
+  document.getElementById('notif-dot')?.classList.remove('show');
 }
 
 // ─── Live tickets ─────────────────────────────────────────────────────────────
@@ -2132,7 +2208,7 @@ async function init() {
   CURRENT = 0;
   updateGuildDisplay();
   loadAll();
-  if (Notification?.permission==='granted') { PUSH.enabled=true; startPushPolling(); }
+  if (browserNotificationsSupported()) { PUSH.enabled = localStorage.getItem('td_push_enabled') === '1' && Notification.permission === 'granted'; updatePushUI(); if (PUSH.enabled) startPushPolling(); }
 }
 
 
@@ -2675,63 +2751,90 @@ async function loadStaleSettings() {
 }
 
 function applyStaleSettings(data) {
-  const chk      = document.getElementById('stale-enabled-chk');
-  const track    = document.getElementById('stale-toggle-track');
-  const thumb    = document.getElementById('stale-toggle-thumb');
-  const label    = document.getElementById('stale-toggle-label');
   const mins     = document.getElementById('stale-minutes');
   const cooldown = document.getElementById('stale-cooldown');
-  if (!chk) return;
 
-  const enabled = !!data.staleRemindersEnabled;
-  chk.checked = enabled;
-  updateStaleToggleUI(enabled);
+  setStaleToggleState(!!data.staleRemindersEnabled);
   if (mins)     mins.value     = data.staleTicketMinutes           || 30;
   if (cooldown) cooldown.value = data.staleReminderCooldownMinutes || 30;
 }
 
+function setStaleToggleState(enabled) {
+  const chk = document.getElementById('stale-enabled-chk');
+  if (chk) chk.checked = !!enabled;
+  updateStaleToggleUI(!!enabled);
+}
+
 function updateStaleToggleUI(enabled) {
+  const btn   = document.getElementById('stale-toggle-btn');
   const track = document.getElementById('stale-toggle-track');
   const thumb = document.getElementById('stale-toggle-thumb');
   const label = document.getElementById('stale-toggle-label');
-  if (!track) return;
+  if (!track || !thumb || !label) return;
+
+  if (btn) btn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
   if (enabled) {
     track.style.background = 'var(--accent, #6366f1)';
     thumb.style.transform  = 'translateX(20px)';
     thumb.style.background = '#fff';
     label.textContent      = 'On';
+    label.style.color      = 'var(--accent2)';
   } else {
     track.style.background = 'var(--surface2)';
     thumb.style.transform  = 'translateX(0)';
     thumb.style.background = '#888';
     label.textContent      = 'Off';
+    label.style.color      = 'var(--text2)';
   }
 }
 
 function onStaleToggle() {
-  const enabled = document.getElementById('stale-enabled-chk').checked;
-  updateStaleToggleUI(enabled);
+  const enabled = !!document.getElementById('stale-enabled-chk')?.checked;
+  setStaleToggleState(enabled);
+}
+
+function toggleStaleReminders(event) {
+  if (event) event.preventDefault();
+  const chk = document.getElementById('stale-enabled-chk');
+  const next = !chk?.checked;
+  setStaleToggleState(next);
+
+  const st = document.getElementById('stale-save-st');
+  if (st) {
+    st.style.color = 'var(--text3)';
+    st.textContent = 'Saving…';
+  }
+  saveStaleSettings();
 }
 
 async function saveStaleSettings() {
   const st      = document.getElementById('stale-save-st');
-  const enabled = document.getElementById('stale-enabled-chk').checked;
-  const mins    = parseInt(document.getElementById('stale-minutes').value)    || 30;
-  const cd      = parseInt(document.getElementById('stale-cooldown').value)   || 30;
-  st.style.color = 'var(--text3)';
-  st.textContent = 'Saving…';
+  const enabled = !!document.getElementById('stale-enabled-chk')?.checked;
+  const mins    = Math.max(1, parseInt(document.getElementById('stale-minutes')?.value, 10) || 30);
+  const cd      = Math.max(1, parseInt(document.getElementById('stale-cooldown')?.value, 10) || 30);
+  if (st) {
+    st.style.color = 'var(--text3)';
+    st.textContent = 'Saving…';
+  }
   try {
-    await api('/api/settings', { method: 'POST', body: {
+    const data = await api('/api/settings', { method: 'POST', body: {
       staleRemindersEnabled:        enabled,
       staleTicketMinutes:           mins,
       staleReminderCooldownMinutes: cd,
     }});
-    st.style.color = 'var(--green)';
-    st.textContent = '✓ Saved';
-    setTimeout(() => { st.textContent = ''; }, 3000);
+    if (data?.settings) applyStaleSettings(data.settings);
+    if (st) {
+      st.style.color = 'var(--green)';
+      st.textContent = '✓ Saved';
+      setTimeout(() => { st.textContent = ''; }, 3000);
+    }
   } catch(e) {
-    st.style.color = '#f87171';
-    st.textContent = '✗ ' + e.message;
+    if (st) {
+      st.style.color = '#f87171';
+      st.textContent = '✗ ' + e.message;
+    }
+    // Re-load from server so the switch does not lie if saving failed.
+    loadStaleSettings();
   }
 }
 
