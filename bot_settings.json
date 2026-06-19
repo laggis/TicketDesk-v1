@@ -1,5 +1,0 @@
-{
-  "staleRemindersEnabled": false,
-  "staleTicketMinutes": 30,
-  "staleReminderCooldownMinutes": 30
-}

@@ -17,6 +17,7 @@ async function setup() {
     priority            VARCHAR(10)  DEFAULT 'normal',
     subject             VARCHAR(255) DEFAULT NULL,
     description         TEXT         DEFAULT NULL,
+    email               VARCHAR(255) DEFAULT NULL,
     user_id             VARCHAR(20)  DEFAULT NULL,
     user_tag            VARCHAR(100) DEFAULT NULL,
     created_by          VARCHAR(100) DEFAULT NULL,
@@ -117,6 +118,83 @@ async function setup() {
     console.log('[DB] Default categories seeded');
   }
 
+
+  await db(`CREATE TABLE IF NOT EXISTS reply_templates (
+    id             INT          AUTO_INCREMENT PRIMARY KEY,
+    label          VARCHAR(100) DEFAULT NULL,
+    text           TEXT         DEFAULT NULL,
+    title          VARCHAR(100) DEFAULT NULL,
+    content        TEXT         DEFAULT NULL,
+    category       VARCHAR(50)  DEFAULT 'General',
+    shortcut       VARCHAR(50)  DEFAULT NULL,
+    sort_order     INT          DEFAULT 0,
+    enabled        TINYINT(1)   DEFAULT 1,
+    created_by_id  VARCHAR(20)  DEFAULT NULL,
+    created_by_tag VARCHAR(100) DEFAULT NULL,
+    created_at     DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    updated_at     DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_reply_templates_enabled (enabled),
+    INDEX idx_reply_templates_category (category),
+    INDEX idx_reply_templates_shortcut (shortcut)
+  ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+
+  await db(`CREATE TABLE IF NOT EXISTS ai_channels (
+    id           INT          AUTO_INCREMENT PRIMARY KEY,
+    channel_id   VARCHAR(20)  NOT NULL UNIQUE,
+    channel_name VARCHAR(100) DEFAULT 'unknown',
+    enabled      TINYINT(1)   DEFAULT 1,
+    created_at   DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    updated_at   DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+
+  await db(`CREATE TABLE IF NOT EXISTS ai_faq (
+    id         INT          AUTO_INCREMENT PRIMARY KEY,
+    title      VARCHAR(120) NOT NULL,
+    content    TEXT         NOT NULL,
+    category   VARCHAR(50)  DEFAULT 'general',
+    enabled    TINYINT(1)   DEFAULT 1,
+    created_at DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_ai_faq_enabled (enabled),
+    INDEX idx_ai_faq_category (category)
+  ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+
+  // Safe migrations for older/newer template table formats
+  const templateMigrations = [
+    "ALTER TABLE reply_templates ADD COLUMN IF NOT EXISTS label VARCHAR(100) DEFAULT NULL",
+    "ALTER TABLE reply_templates ADD COLUMN IF NOT EXISTS text TEXT DEFAULT NULL",
+    "ALTER TABLE reply_templates ADD COLUMN IF NOT EXISTS title VARCHAR(100) DEFAULT NULL",
+    "ALTER TABLE reply_templates ADD COLUMN IF NOT EXISTS content TEXT DEFAULT NULL",
+    "ALTER TABLE reply_templates ADD COLUMN IF NOT EXISTS category VARCHAR(50) DEFAULT 'General'",
+    "ALTER TABLE reply_templates ADD COLUMN IF NOT EXISTS shortcut VARCHAR(50) DEFAULT NULL",
+    "ALTER TABLE reply_templates ADD COLUMN IF NOT EXISTS sort_order INT DEFAULT 0",
+    "ALTER TABLE reply_templates ADD COLUMN IF NOT EXISTS enabled TINYINT(1) DEFAULT 1",
+    "ALTER TABLE reply_templates ADD COLUMN IF NOT EXISTS created_by_id VARCHAR(20) DEFAULT NULL",
+    "ALTER TABLE reply_templates ADD COLUMN IF NOT EXISTS created_by_tag VARCHAR(100) DEFAULT NULL",
+    "ALTER TABLE reply_templates ADD COLUMN IF NOT EXISTS created_at DATETIME DEFAULT CURRENT_TIMESTAMP",
+    "ALTER TABLE reply_templates ADD COLUMN IF NOT EXISTS updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+  ];
+  for (const m of templateMigrations) await db(m).catch(() => {});
+  await db("UPDATE reply_templates SET label = title WHERE (label IS NULL OR label = '') AND title IS NOT NULL").catch(() => {});
+  await db("UPDATE reply_templates SET title = label WHERE (title IS NULL OR title = '') AND label IS NOT NULL").catch(() => {});
+  await db("UPDATE reply_templates SET text = content WHERE (text IS NULL OR text = '') AND content IS NOT NULL").catch(() => {});
+  await db("UPDATE reply_templates SET content = text WHERE (content IS NULL OR content = '') AND text IS NOT NULL").catch(() => {});
+
+  const tmplCount = await db('SELECT COUNT(*) as n FROM reply_templates').catch(() => [{ n: 0 }]);
+  if (tmplCount[0].n === 0) {
+    await db(`INSERT INTO reply_templates (label, text, title, content, category, sort_order, enabled) VALUES
+      ('Hälsning', 'Hej! 👋\n\nHur kan vi hjälpa dig idag?', 'Hälsning', 'Hej! 👋\n\nHur kan vi hjälpa dig idag?', 'General', 10, 1),
+      ('Behöver info', 'Skulle du kunna ge oss lite mer info:\n- Vad hände?\n- När började det?\n- Skärmdumpar/felmeddelanden?\n\nTack!', 'Behöver info', 'Skulle du kunna ge oss lite mer info:\n- Vad hände?\n- När började det?\n- Skärmdumpar/felmeddelanden?\n\nTack!', 'General', 20, 1),
+      ('Jobbar på det', 'Tack för ditt tålamod — vi tittar på detta nu och återkommer till dig så snart vi kan.', 'Jobbar på det', 'Tack för ditt tålamod — vi tittar på detta nu och återkommer till dig så snart vi kan.', 'General', 30, 1),
+      ('Löst', 'Detta bör nu vara löst. Om problemet kvarstår, svara här så hjälper vi dig vidare.', 'Löst', 'Detta bör nu vara löst. Om problemet kvarstår, svara här så hjälper vi dig vidare.', 'General', 40, 1),
+      ('Be om loggar', 'För att vi ska kunna felsöka detta behöver vi dina loggar.\n\nSkicka gärna loggar, skärmdumpar eller exakt felmeddelande så tittar vi vidare.', 'Be om loggar', 'För att vi ska kunna felsöka detta behöver vi dina loggar.\n\nSkicka gärna loggar, skärmdumpar eller exakt felmeddelande så tittar vi vidare.', 'Support', 50, 1),
+      ('Eskaleras', 'Tack för din rapport — detta är mer komplext och vi eskalerar ditt ärende till nästa nivå. Vi återkommer så snart vi kan.', 'Eskaleras', 'Tack för din rapport — detta är mer komplext och vi eskalerar ditt ärende till nästa nivå. Vi återkommer så snart vi kan.', 'Support', 60, 1),
+      ('Betalning mottagen', 'Vi har nu bekräftat din betalning. Din order behandlas och du kommer att få ett bekräftelsemail inom kort.', 'Betalning mottagen', 'Vi har nu bekräftat din betalning. Din order behandlas och du kommer att få ett bekräftelsemail inom kort.', 'Köp', 80, 1),
+      ('Stänger – inget svar', 'Vi har inte hört från dig på ett tag och stänger nu detta ärende. Öppna gärna ett nytt om du fortfarande behöver hjälp!', 'Stänger – inget svar', 'Vi har inte hört från dig på ett tag och stänger nu detta ärende. Öppna gärna ett nytt om du fortfarande behöver hjälp!', 'Avslutning', 100, 1)
+    `);
+    console.log('[DB] Reply templates seeded');
+  }
+
   await db(`CREATE TABLE IF NOT EXISTS user_emails (
     id          INT          AUTO_INCREMENT PRIMARY KEY,
     discord_id  VARCHAR(20)  NOT NULL UNIQUE,
@@ -141,6 +219,7 @@ async function setup() {
     "ALTER TABLE ticket_messages ADD COLUMN IF NOT EXISTS attachments TEXT DEFAULT NULL",
     "ALTER TABLE ticket_categories ADD COLUMN IF NOT EXISTS color VARCHAR(7) DEFAULT '#6366f1'",
     "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS last_reminder_at DATETIME DEFAULT NULL",
+    "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS email VARCHAR(255) DEFAULT NULL",
   ];
   for (const m of migrations) {
     await db(m).catch(() => {}); // ignore if column already exists

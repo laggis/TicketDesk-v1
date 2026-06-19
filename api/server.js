@@ -9,6 +9,9 @@ const ticketsRouter    = require('./routes/tickets');
 const categoriesRouter = require('./routes/categories');
 const loginRouter      = require('./routes/login');
 const statsRouter      = require('./routes/stats');
+const templatesRouter  = require('./routes/templates');
+const aiChannelsRouter = require('./routes/aichannels');
+const faqRouter        = require('./routes/faq');
 const { router: settingsRouter } = require('./routes/settings');
 const { errorHandler } = require('./middleware/errorHandler');
 const { rateLimit }    = require('./middleware/rateLimit');
@@ -49,6 +52,9 @@ async function startAPI() {
   app.use('/api/login',      rateLimit({ windowMs: 60_000, max: 20, message: 'Too many login requests' }), loginRouter);
   app.use('/api/stats',      statsRouter);
   app.use('/api/settings',   settingsRouter);
+  app.use('/api/templates',  templatesRouter);
+  app.use('/api/ai-channels', aiChannelsRouter);
+  app.use('/api/faq',        faqRouter);
 
   // ── Panel static files ──────────────────────────────────────────────────────
   const panelDir = path.join(__dirname, '..', 'panel');

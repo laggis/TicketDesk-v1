@@ -9,6 +9,7 @@ const path = require('path');
 const fs   = require('fs');
 const db   = require('../db/pool');
 const ai   = require('./ai');
+const nodemailer = require('nodemailer');
 
 // ─── Config ────────────────────────────────────────────────────────────────────
 const BOT_TOKEN          = process.env.BOT_TOKEN;
@@ -22,17 +23,149 @@ const ADMIN_ROLE_IDS     = (process.env.ADMIN_ROLE_IDS   || '').split(',').map(s
 const SERVER_NAME        = process.env.SERVER_NAME || 'TicketDesk';
 const MAX_OPEN_TICKETS_PER_USER = Math.max(1, parseInt(process.env.MAX_OPEN_TICKETS_PER_USER || '5'));
 
+// SMTP Config
+let SMTP_CONFIG = {
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT) || 587,
+  secure: process.env.SMTP_SECURE === 'true',
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS
+  },
+  from: process.env.SMTP_FROM || process.env.SMTP_USER
+};
+
+// Initialize SMTP transporter
+let mailTransporter = null;
+
+function initMailTransporter() {
+  const settings = getStaleSettings();
+  // Merge settings from bot_settings.json with env vars (settings take precedence)
+  SMTP_CONFIG = {
+    host: settings.smtp?.host || process.env.SMTP_HOST,
+    port: parseInt(settings.smtp?.port || process.env.SMTP_PORT) || 587,
+    secure: (settings.smtp?.secure ?? (process.env.SMTP_SECURE === 'true')),
+    auth: {
+      user: settings.smtp?.user || process.env.SMTP_USER,
+      pass: settings.smtp?.pass || process.env.SMTP_PASS
+    },
+    from: settings.smtp?.from || process.env.SMTP_FROM || settings.smtp?.user || process.env.SMTP_USER
+  };
+
+  if (SMTP_CONFIG.host && SMTP_CONFIG.auth.user && SMTP_CONFIG.auth.pass) {
+    mailTransporter = nodemailer.createTransport({
+      host: SMTP_CONFIG.host,
+      port: SMTP_CONFIG.port,
+      secure: SMTP_CONFIG.secure,
+      auth: {
+        user: SMTP_CONFIG.auth.user,
+        pass: SMTP_CONFIG.auth.pass
+      },
+      tls: {
+        rejectUnauthorized: false // Allow self-signed certs if needed
+      }
+    });
+    console.log('[SMTP] Transporter initialized');
+  } else {
+    mailTransporter = null;
+    console.log('[SMTP] Not configured');
+  }
+}
+
+// Send transcript email function
+async function sendTranscriptEmail(email, ticket, transcriptText, messages) {
+  // Re-init transporter in case settings changed
+  if (!mailTransporter) initMailTransporter();
+  if (!mailTransporter) {
+    console.log('[SMTP] Not configured, skipping email');
+    return;
+  }
+
+  try {
+    await mailTransporter.sendMail({
+      from: SMTP_CONFIG.from,
+      to: email,
+      subject: `[${SERVER_NAME}] Ticket Closed — #${ticket.ticket_number || ticket.id.slice(0,8)}`,
+      text: transcriptText,
+      html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; max-width: 700px; margin: 0 auto; background: #ffffff; padding: 40px;">
+          <div style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); padding: 32px; border-radius: 12px; color: white; text-align: center;">
+            <div style="font-size: 48px; margin-bottom: 16px;">🎫</div>
+            <h1 style="margin:0; font-size: 28px;">Ticket Closed</h1>
+          </div>
+          
+          <div style="margin-top: 32px;">
+            <div style="background: #f9fafb; border-radius: 8px; padding: 20px; margin-bottom: 24px;">
+              <h2 style="margin-top:0; color: #111827; font-size: 20px;">Ticket Details</h2>
+              <table style="width:100%; border-collapse: collapse;">
+                <tr>
+                  <td style="padding:10px 0; color: #6b7280; font-size: 14px;">Ticket #</td>
+                  <td style="padding:10px 0; color: #111827; font-weight:600;">${ticket.ticket_number || ticket.id.slice(0,8)}</td>
+                </tr>
+                <tr>
+                  <td style="padding:10px 0; color: #6b7280; font-size: 14px;">Category</td>
+                  <td style="padding:10px 0; color: #111827; font-weight:600;">${ticket.category || ticket.type || 'Support'}</td>
+                </tr>
+                <tr>
+                  <td style="padding:10px 0; color: #6b7280; font-size: 14px;">Subject</td>
+                  <td style="padding:10px 0; color: #111827; font-weight:600;">${ticket.subject || '—'}</td>
+                </tr>
+                <tr>
+                  <td style="padding:10px 0; color: #6b7280; font-size: 14px;">Messages</td>
+                  <td style="padding:10px 0; color: #111827; font-weight:600;">${messages.length}</td>
+                </tr>
+              </table>
+            </div>
+            
+            <p style="color: #4b5563; line-height: 1.6; font-size: 16px;">
+              Hej! Din ticket har nu stängts. Tack för att du kontaktade oss!
+            </p>
+            
+            <p style="color: #4b5563; line-height: 1.6; font-size: 16px;">
+              Nedan bifogar vi ett transcript av hela konversationen.
+            </p>
+            
+            <div style="margin-top:32px; padding-top:24px; border-top:1px solid #e5e7eb; color: #9ca3af; font-size:14px;">
+              Skickat från <strong>${SERVER_NAME}</strong>
+            </div>
+          </div>
+        </div>
+      `,
+      attachments: [
+        {
+          filename: `ticket-${ticket.ticket_number || ticket.id.slice(0,8)}-transcript.txt`,
+          content: transcriptText
+        }
+      ]
+    });
+    console.log('[SMTP] Transcript email sent to', email);
+  } catch (err) {
+    console.error('[SMTP] Failed to send email:', err.message);
+  }
+}
+
 // Stale ticket reminders — settings loaded dynamically from bot_settings.json
 const SETTINGS_PATH = path.join(__dirname, '..', 'bot_settings.json');
 const DEFAULT_STALE_SETTINGS = {
   staleRemindersEnabled:        true,
   staleTicketMinutes:           30,
   staleReminderCooldownMinutes: 30,
+  smtp: {
+    host: '',
+    port: 587,
+    user: '',
+    pass: '',
+    from: '',
+    secure: false
+  }
 };
 function getStaleSettings() {
   try {
     const raw = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
-    return { ...DEFAULT_STALE_SETTINGS, ...raw };
+    const merged = { ...DEFAULT_STALE_SETTINGS, ...raw };
+    // Ensure smtp object exists and is merged properly
+    merged.smtp = { ...DEFAULT_STALE_SETTINGS.smtp, ...raw.smtp };
+    return merged;
   } catch {
     return { ...DEFAULT_STALE_SETTINGS };
   }
@@ -170,47 +303,244 @@ async function fetchAllMessages(channel) {
   return msgs.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 }
 
-function buildTranscript(messages, ticketId, channel) {
+function buildTranscript(messages, ticketId, channel, ticketData) {
   return `<!doctype html><html><head><meta charset="utf-8">
-<title>Ticket ${esc(ticketId)}</title>
+<title>Ticket #${ticketData?.ticket_number || ticketId.slice(0,8)}</title>
 <style>
-  body{font-family:system-ui,sans-serif;background:#0b0f14;color:#e5e7eb;padding:20px;line-height:1.5}
-  h1{color:#818cf8} .meta{color:#6b7280;font-size:13px;margin-bottom:24px}
-  .msg{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid #1f2937}
-  .av{width:40px;height:40px;border-radius:50%;flex-shrink:0}
-  .name{font-weight:700;color:#c7d2fe} .time{color:#6b7280;font-size:11px;margin-left:8px}
-  .text{white-space:pre-wrap;margin-top:3px;color:#d1d5db}
-  img.att{max-width:400px;border-radius:6px;margin-top:6px;display:block} a{color:#818cf8}
-  .footer{margin-top:24px;color:#4b5563;font-size:12px;text-align:center}
+  *{box-sizing:border-box}
+  body{
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background: linear-gradient(135deg, #0b0f14 0%, #111827 100%);
+    color: #e5e7eb;
+    padding: 40px;
+    line-height: 1.6;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  .container{
+    background: #111827;
+    border-radius: 16px;
+    padding: 32px;
+    box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+    border: 1px solid #1f2937;
+  }
+  h1{color:#818cf8;font-size:28px;margin:0 0 8px 0;display:flex;align-items:center;gap:12px}
+  .ticket-badge{
+    display:inline-block;
+    background: rgba(129,140,248,0.15);
+    color:#818cf8;
+    padding:6px 12px;
+    border-radius:999px;
+    font-size:12px;
+    font-weight:600;
+    letter-spacing:0.5px;
+  }
+  .meta{
+    color:#6b7280;
+    font-size:14px;
+    margin-bottom:32px;
+    background: #0b0f14;
+    padding:20px;
+    border-radius:12px;
+    border:1px solid #1f2937;
+  }
+  .meta-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+    gap:16px;
+  }
+  .meta-item{display:flex;flex-direction:column;gap:4px}
+  .meta-label{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#9ca3af}
+  .meta-value{font-weight:600;color:#e5e7eb}
+  .msg{
+    display:flex;
+    gap:16px;
+    padding:20px 0;
+    border-bottom:1px solid #1f2937;
+  }
+  .av{
+    width:48px;
+    height:48px;
+    border-radius:50%;
+    flex-shrink:0;
+    background:linear-gradient(135deg,#818cf8,#c084fc);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-weight:700;
+    color:#fff;
+  }
+  .msg-content{flex:1}
+  .msg-header{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+  .name{font-weight:700;color:#c7d2fe;font-size:16px}
+  .time{color:#6b7280;font-size:12px}
+  .text{white-space:pre-wrap;color:#d1d5db;font-size:15px}
+  .attachments{margin-top:12px;display:flex;flex-direction:column;gap:8px}
+  .att-item{display:flex;align-items:center;gap:10px;padding:12px;background:#0b0f14;border-radius:8px;border:1px solid #1f2937}
+  .att-icon{font-size:20px}
+  img.att-img{max-width:100%;border-radius:8px;margin-top:12px;display:block;border:1px solid #1f2937}
+  a{color:#818cf8;text-decoration:none}
+  a:hover{text-decoration:underline}
+  .footer{
+    margin-top:32px;
+    color:#4b5563;
+    font-size:12px;
+    text-align:center;
+    padding-top:20px;
+    border-top:1px solid #1f2937;
+  }
 </style></head><body>
-<h1>🎫 Ticket ${esc(ticketId.slice(0,8))}</h1>
-<div class="meta">Channel: ${esc(channel?.name)} &nbsp;|&nbsp; ${messages.length} messages</div>
+<div class="container">
+  <h1>🎫 Ticket #${ticketData?.ticket_number || ticketId.slice(0,8)}</h1>
+  <span class="ticket-badge">${ticketData?.category || ticketData?.type || 'Support'}</span>
+  
+  <div class="meta">
+    <div class="meta-grid">
+      ${ticketData?.subject ? `
+      <div class="meta-item">
+        <div class="meta-label">Subject</div>
+        <div class="meta-value">${esc(ticketData.subject)}</div>
+      </div>
+      ` : ''}
+      <div class="meta-item">
+        <div class="meta-label">Created by</div>
+        <div class="meta-value">${esc(ticketData?.user_tag || ticketData?.created_by || 'Unknown')}</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-label">Channel</div>
+        <div class="meta-value">#${esc(channel?.name || 'unknown')}</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-label">Messages</div>
+        <div class="meta-value">${messages.length}</div>
+      </div>
+    </div>
+  </div>
+
 ${messages.map(m => {
-  const atts = [...(m.attachments?.values() || [])].map(a =>
-    /\.(png|jpe?g|gif|webp)$/i.test(a.name||'')
-      ? '<img class="att" src="' + a.url + '">'
-      : '<a href="' + a.url + '">' + esc(a.name||'file') + '</a>'
-  ).join('');
+  const attachments = [...(m.attachments?.values() || [])];
+  const imgAtts = attachments.filter(a => /\.(png|jpe?g|gif|webp)$/i.test(a.name||''));
+  const otherAtts = attachments.filter(a => !imgAtts.includes(a));
+  
   return '<div class="msg">' +
-    (m.author?.displayAvatarURL() ? '<img class="av" src="' + m.author.displayAvatarURL({size:64,extension:'png'}) + '">' : '') +
-    '<div><span class="name">' + esc(m.author?.tag||'Unknown') + '</span>' +
-    '<span class="time">' + new Date(m.createdTimestamp).toLocaleString('sv-SE') + '</span>' +
-    '<div class="text">' + esc(m.content||'') + '</div>' + atts + '</div></div>';
+    (m.author?.displayAvatarURL() 
+      ? `<img class="av" src="${m.author.displayAvatarURL({extension:'png'})}" alt="Avatar">` 
+      : `<div class="av">${(m.author?.username || 'U')[0].toUpperCase()}</div>`) +
+    '<div class="msg-content">' +
+    '<div class="msg-header">' +
+    `<span class="name">${esc(m.author?.tag || 'Unknown User')}</span>` +
+    `<span class="time">${new Date(m.createdTimestamp).toLocaleString('sv-SE', { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric', 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    })}</span>` +
+    '</div>' +
+    (m.content ? `<div class="text">${esc(m.content)}</div>` : '') +
+    (otherAtts.length > 0 
+      ? '<div class="attachments">' + 
+        otherAtts.map(a => `
+          <div class="att-item">
+            <span class="att-icon">📎</span>
+            <a href="${a.url}" target="_blank">${esc(a.name || 'file')}</a>
+          </div>
+        `).join('') + 
+      '</div>' : '') +
+    (imgAtts.length > 0 ? imgAtts.map(a => `<img class="att-img" src="${a.url}" alt="${esc(a.name || 'image')}">`).join('') : '') +
+    '</div></div>';
 }).join('\n')}
-<div class="footer">Generated ${new Date().toLocaleString('sv-SE')} by TicketDesk</div>
+
+<div class="footer">
+  Generated on ${new Date().toLocaleString('sv-SE')} by TicketDesk
+</div>
+</div>
 </body></html>`;
+}
+
+function buildPlainTextTranscript(messages, ticketId, channel, ticketData) {
+  const num      = ticketData?.ticket_number || ticketId.slice(0, 8);
+  const category = ticketData?.category || ticketData?.type || 'Support';
+  const subject  = ticketData?.subject || null;
+  const creator  = ticketData?.user_tag || ticketData?.created_by || 'Unknown';
+  const chName   = channel?.name || 'unknown';
+  const generated = new Date().toLocaleString('sv-SE');
+
+  const divider = '─'.repeat(63);
+  const heavyDivider = '═'.repeat(63);
+
+  const fields = [
+    ['Ticket #', num],
+    ['Category', category],
+    ...(subject ? [['Subject', subject]] : []),
+    ['Created by', creator],
+    ['Channel', `#${chName}`],
+    ['Messages', String(messages.length)],
+    ['Generated', generated],
+  ];
+  const labelWidth = Math.max(...fields.map(([label]) => label.length));
+
+  let text = `${heavyDivider}\n`;
+  text += `  TICKET TRANSCRIPT\n`;
+  text += `${heavyDivider}\n\n`;
+  fields.forEach(([label, value]) => {
+    text += `  ${label.padEnd(labelWidth)} : ${value}\n`;
+  });
+  text += `\n${heavyDivider}\n\n`;
+
+  let lastDateKey = null;
+
+  messages.forEach(m => {
+    const dt = new Date(m.createdTimestamp);
+    const dateKey = dt.toLocaleDateString('sv-SE');
+    if (dateKey !== lastDateKey) {
+      text += `── ${dateKey} ${'─'.repeat(Math.max(0, 56 - dateKey.length))}\n\n`;
+      lastDateKey = dateKey;
+    }
+
+    const time = dt.toLocaleTimeString('sv-SE', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+    const author = m.author?.tag || m.author?.username || 'Unknown User';
+
+    text += `[${time}] ${author}\n`;
+
+    const body = (m.content || '').trim();
+    if (body) {
+      text += body.split('\n').map(line => `    ${line}`).join('\n') + '\n';
+    }
+
+    const attachments = [...(m.attachments?.values() || [])];
+    if (attachments.length > 0) {
+      attachments.forEach(a => {
+        text += `    📎 ${a.name || 'file'} — ${a.url}\n`;
+      });
+    }
+
+    text += '\n';
+  });
+
+  text += `${heavyDivider}\n`;
+  text += `  End of transcript — ${messages.length} message${messages.length === 1 ? '' : 's'}\n`;
+  text += `${heavyDivider}\n`;
+
+  return text;
 }
 
 // ─── Close ticket ──────────────────────────────────────────────────────────────
 async function closeTicket(channel, ticketId, closedBy) {
   try {
     const messages = await fetchAllMessages(channel);
-    const html     = buildTranscript(messages, ticketId, channel);
-    const buf      = Buffer.from(html, 'utf-8');
-    const fname    = 'transcript-' + ticketId + '.html';
-
+    
     const [ticket] = await db('SELECT * FROM tickets WHERE id = ? LIMIT 1', [ticketId]).catch(() => [[]]);
     const opener   = Array.isArray(ticket) ? ticket[0] : ticket;
+
+    const html     = buildTranscript(messages, ticketId, channel, opener);
+    const plainText = buildPlainTextTranscript(messages, ticketId, channel, opener);
+    const htmlBuf  = Buffer.from(html, 'utf-8');
+    const txtBuf   = Buffer.from(plainText, 'utf-8');
+    const htmlFname = `ticket-${opener?.ticket_number || ticketId.slice(0,8)}-transcript.html`;
+    const txtFname  = `ticket-${opener?.ticket_number || ticketId.slice(0,8)}-transcript.txt`;
 
     const dur = opener?.opened_at
       ? (() => { const s = Math.round((Date.now() - new Date(opener.opened_at)) / 1000); const m = Math.floor(s/60); return m > 0 ? m+'m '+(s%60)+'s' : s+'s'; })()
@@ -234,12 +564,30 @@ async function closeTicket(channel, ticketId, closedBy) {
     const tCh = TRANSCRIPT_CHANNEL
       ? await client.channels.fetch(TRANSCRIPT_CHANNEL).catch(() => null)
       : null;
-    if (tCh) await tCh.send({ content: '📄 Transcript `' + ticketId.slice(0,8) + '`', files: [{ attachment: buf, name: fname }] });
+    if (tCh) await tCh.send({ 
+      content: '📄 Transcript `' + ticketId.slice(0,8) + '`', 
+      files: [
+        { attachment: htmlBuf, name: htmlFname },
+        { attachment: txtBuf, name: txtFname }
+      ] 
+    });
 
     // DM opener
     if (opener?.created_by_id) {
       const u = await client.users.fetch(opener.created_by_id).catch(() => null);
-      if (u) await u.send({ content: '📄 Din ticket har stängts:', embeds: [embed], files: [{ attachment: buf, name: fname }] }).catch(() => {});
+      if (u) await u.send({ 
+        content: '📄 Din ticket har stängts:', 
+        embeds: [embed], 
+        files: [
+          { attachment: htmlBuf, name: htmlFname },
+          { attachment: txtBuf, name: txtFname }
+        ] 
+      }).catch(() => {});
+    }
+
+    // Send email transcript if user provided email
+    if (opener?.email) {
+      await sendTranscriptEmail(opener.email, opener, plainText, messages);
     }
 
     await channel.send({ embeds: [embed] });
@@ -397,6 +745,7 @@ client.once('ready', async () => {
   console.log('\n✅ Bot logged in as ' + client.user.tag);
 
   await loadCategories();
+  initMailTransporter();
 
   // Post or restore panel embed
   const ch = await client.channels.fetch(TICKET_CHANNEL_ID).catch(() => null);
@@ -486,7 +835,7 @@ client.on('messageCreate', async msg => {
   await db(
     'INSERT INTO ticket_messages (ticket_id, discord_msg_id, author_id, author_tag, avatar_url, is_staff, content, attachments) VALUES (?,?,?,?,?,?,?,?)',
     [match[1], msg.id, msg.author.id, msg.author.tag,
-     msg.author.displayAvatarURL({ size: 64, extension: 'png' }),
+     msg.author.displayAvatarURL({ extension: 'png' }),
      member && isStaff(member) ? 1 : 0,
      msg.content || '',
      attachments.length ? JSON.stringify(attachments) : null]
@@ -513,6 +862,9 @@ client.on('interactionCreate', async interaction => {
         new TextInputBuilder().setCustomId('subject').setLabel('Ämne').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(200)
       ),
       new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('email').setLabel('E-post').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(255)
+      ),
+      new ActionRowBuilder().addComponents(
         new TextInputBuilder().setCustomId('description').setLabel('Beskrivning').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1500)
       ),
     );
@@ -524,6 +876,7 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_ticket_')) {
     const type        = interaction.customId.replace('modal_ticket_', '');
     const subject     = interaction.fields.getTextInputValue('subject');
+    const email       = interaction.fields.getTextInputValue('email');
     const description = interaction.fields.getTextInputValue('description');
     const { guild, user } = interaction;
 
@@ -573,6 +926,7 @@ client.on('interactionCreate', async interaction => {
           { name: 'Status',      value: '🟢 Öppen',             inline: true },
           { name: 'Skapad av',   value: String(user),           inline: true },
           { name: 'Ämne',        value: subject,                inline: false },
+          ...(email ? [{ name: 'E-post', value: email, inline: false }] : []),
           { name: 'Beskrivning', value: description,            inline: false },
         )
         .setFooter({ text: 'Stäng med knappen nedan' })
@@ -588,8 +942,8 @@ client.on('interactionCreate', async interaction => {
       if (supportRoles.length) await ticketCh.send(supportRoles.map(r => r.toString()).join(' '));
 
       await db(
-        'INSERT INTO tickets (id, type, category, status, subject, description, channel_id, guild_id, created_by, created_by_id, user_id, user_tag) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-        [ticketId, type, type.toLowerCase(), 'Öppen', subject, description, ticketCh.id, guild.id, user.tag, user.id, user.id, user.tag]
+        'INSERT INTO tickets (id, type, category, status, subject, email, description, channel_id, guild_id, created_by, created_by_id, user_id, user_tag) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        [ticketId, type, type.toLowerCase(), 'Öppen', subject, email, description, ticketCh.id, guild.id, user.tag, user.id, user.id, user.tag]
       ).catch(err => console.error('[DB] Ticket save failed:', err.message));
 
       await interaction.editReply({ content: '✅ Din ticket: ' + ticketCh.toString() });
@@ -784,7 +1138,7 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isAutocomplete() && interaction.commandName === 'template') {
     const focused = interaction.options.getFocused().toLowerCase();
     try {
-      const rows = await db('SELECT label FROM reply_templates WHERE enabled = 1 ORDER BY sort_order ASC, label ASC');
+      const rows = await db("SELECT COALESCE(NULLIF(label,''), NULLIF(title,''), shortcut, CONCAT('Template #', id)) AS label FROM reply_templates WHERE enabled = 1 ORDER BY sort_order ASC, label ASC");
       const filtered = rows
         .filter(r => r.label.toLowerCase().includes(focused))
         .slice(0, 25)
@@ -802,7 +1156,7 @@ client.on('interactionCreate', async interaction => {
     if (!member || !isStaff(member)) return interaction.reply({ content: '🚫 Saknar behörighet.', flags: 64 });
 
     const label = interaction.options.getString('label', true);
-    const rows = await db('SELECT text FROM reply_templates WHERE label = ? AND enabled = 1', [label]).catch(() => []);
+    const rows = await db("SELECT COALESCE(NULLIF(text,''), NULLIF(content,''), '') AS text FROM reply_templates WHERE enabled = 1 AND (label = ? OR title = ? OR shortcut = ?)", [label, label, label]).catch(() => []);
     if (!rows.length) return interaction.reply({ content: `❌ Hittade ingen template med namn \`${label}\`. Kolla stavningen.`, flags: 64 });
 
     const text = rows[0].text;

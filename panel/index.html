@@ -363,6 +363,8 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
     <button class="icon-btn"        data-page="staff"    onclick="nav('staff',this)"    data-tip="Staff">👥</button>
     <div class="icon-sep"></div>
     <button class="icon-btn"        data-page="categories" onclick="nav('categories',this)" data-tip="Categories">🗂️</button>
+    <button class="icon-btn"        data-page="templates" onclick="nav('templates',this)" data-tip="Reply Templates">💬</button>
+    <button class="icon-btn"        data-page="ai" onclick="nav('ai',this)" data-tip="AI Tools">🤖</button>
     <button class="icon-btn"        data-page="export"   onclick="nav('export',this)"   data-tip="Export">📤</button>
     <button class="icon-btn"        data-page="panel-users" onclick="nav('panel-users',this)" data-tip="Panel Users">🔑</button>
     <button class="icon-btn"        data-page="settings" onclick="nav('settings',this)" data-tip="Settings" style="margin-top:auto">⚙️</button>
@@ -527,6 +529,63 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
       </div>
     </div>
 
+
+    <!-- REPLY TEMPLATES -->
+    <div class="page" id="page-templates">
+      <div class="page-header">
+        <div><div class="page-title">Reply Templates</div><div class="page-sub">Saved canned replies used by the panel composer and /template command.</div></div>
+        <button class="btn sm" onclick="loadTemplates()">↻ Refresh</button>
+      </div>
+      <div class="table-wrap" style="padding:20px;margin-bottom:14px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 120px 100px;gap:10px;margin-bottom:10px">
+          <div class="field"><label>Label</label><input class="sinput" id="tpl-label" placeholder="Example: Behöver info"></div>
+          <div class="field"><label>Category</label><input class="sinput" id="tpl-category" placeholder="General" value="General"></div>
+          <div class="field"><label>Shortcut</label><input class="sinput" id="tpl-shortcut" placeholder="info"></div>
+          <div class="field"><label>Sort</label><input class="sinput" id="tpl-sort" type="number" value="0"></div>
+        </div>
+        <div class="field"><label>Reply Text</label><textarea class="sinput" id="tpl-text" rows="5" placeholder="Write the saved reply here..." style="resize:vertical"></textarea></div>
+        <input type="hidden" id="tpl-id">
+        <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
+          <button class="btn sm primary" onclick="saveTemplate()" id="tpl-save-btn">Save Template</button>
+          <button class="btn sm" onclick="clearTemplateForm()">Clear</button>
+          <span id="tpl-msg" style="font-size:12px;color:var(--text3)"></span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Label</th><th>Category</th><th>Shortcut</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
+        <tbody id="templates-tbody"><tr><td colspan="5" style="text-align:center;color:var(--text3);padding:30px">Loading…</td></tr></tbody></table>
+      </div>
+    </div>
+
+    <!-- AI TOOLS -->
+    <div class="page" id="page-ai">
+      <div class="page-header">
+        <div><div class="page-title">AI Tools</div><div class="page-sub">Groq AI draft replies, summaries, FAQ knowledge and AI channel allow-list.</div></div>
+        <button class="btn sm" onclick="loadAiTools()">↻ Refresh</button>
+      </div>
+      <div class="table-wrap" style="padding:18px;margin-bottom:14px">
+        <div style="font-size:13px;color:var(--text2);line-height:1.6">AI will work when <code style="background:var(--bg2);padding:1px 6px;border-radius:4px">GROQ_API_KEY</code> is set in your <code style="background:var(--bg2);padding:1px 6px;border-radius:4px">.env</code> and TicketDesk is restarted. The panel AI button only creates a draft; it never sends without you clicking send.</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div class="table-wrap" style="padding:20px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div style="font-weight:700">FAQ / AI Knowledge</div><button class="btn sm" onclick="clearFaqForm()">Clear</button></div>
+          <div class="field"><label>Title</label><input class="sinput" id="faq-title" placeholder="Common problem"></div>
+          <div class="field"><label>Category</label><input class="sinput" id="faq-category" placeholder="Support" value="Support"></div>
+          <div class="field"><label>Content</label><textarea class="sinput" id="faq-content" rows="5" placeholder="Knowledge the AI can use..." style="resize:vertical"></textarea></div>
+          <input type="hidden" id="faq-id">
+          <div style="display:flex;gap:8px;margin:12px 0"><button class="btn sm primary" onclick="saveFaq()">Save FAQ</button><span id="faq-msg" style="font-size:12px;color:var(--text3)"></span></div>
+          <div id="faq-list" style="display:flex;flex-direction:column;gap:8px;max-height:360px;overflow:auto"></div>
+        </div>
+        <div class="table-wrap" style="padding:20px">
+          <div style="font-weight:700;margin-bottom:12px">AI Channels</div>
+          <div class="field"><label>Discord Channel ID</label><input class="sinput" id="ai-channel-id" placeholder="123456789012345678"></div>
+          <div class="field"><label>Channel Name</label><input class="sinput" id="ai-channel-name" placeholder="ticket-support"></div>
+          <div style="display:flex;gap:8px;margin:12px 0"><button class="btn sm primary" onclick="addAiChannel()">Add Channel</button><span id="ai-channel-msg" style="font-size:12px;color:var(--text3)"></span></div>
+          <div id="ai-channel-list" style="display:flex;flex-direction:column;gap:8px;max-height:420px;overflow:auto"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- PANEL USERS -->
     <div class="page" id="page-panel-users">
       <div class="page-title">Panel Users</div>
@@ -647,6 +706,61 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
           <div style="display:flex;align-items:center;gap:10px;margin-top:4px">
             <button class="btn sm primary" onclick="saveStaleSettings()">Save</button>
             <span id="stale-save-st" style="font-size:12px;color:var(--text3)"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- SMTP Settings (admin only) -->
+      <div class="table-wrap" id="smtp-settings-section" style="padding:20px;margin-top:16px;display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+          <div>
+            <div style="font-size:15px;font-weight:700">&#x1F4E7; SMTP Settings</div>
+            <div style="font-size:12px;color:var(--text3);margin-top:3px">Configure email settings for sending ticket transcripts to users.</div>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div class="field">
+              <label>SMTP Host</label>
+              <input class="sinput" id="smtp-host" placeholder="smtp.example.com">
+            </div>
+            <div class="field">
+              <label>SMTP Port</label>
+              <input class="sinput" id="smtp-port" type="number" min="1" max="65535" placeholder="587">
+            </div>
+            <div class="field">
+              <label>SMTP Username</label>
+              <input class="sinput" id="smtp-user" placeholder="user@example.com">
+            </div>
+            <div class="field">
+              <label>SMTP Password</label>
+              <input class="sinput" id="smtp-pass" type="password" placeholder="Enter password">
+            </div>
+            <div class="field">
+              <label>From Email Address</label>
+              <input class="sinput" id="smtp-from" placeholder="noreply@example.com">
+            </div>
+            <div class="field" style="display:flex;flex-direction:column;gap:8px">
+              <label>Use Secure Connection (SSL/TLS)</label>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="smtp-secure">
+                <span style="font-size:12px;color:var(--text2)">Enable (usually port 465)</span>
+              </label>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:end">
+            <div class="field">
+              <label>Test Email Address</label>
+              <input class="sinput" id="smtp-test-email" placeholder="test@example.com">
+            </div>
+            <button class="btn sm" id="smtp-test-btn" onclick="testSmtp()">Send Test Email</button>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:10px;margin-top:4px">
+            <button class="btn sm primary" onclick="saveSmtpSettings()">Save SMTP Settings</button>
+            <span id="smtp-save-st" style="font-size:12px;color:var(--text3)"></span>
           </div>
         </div>
       </div>
@@ -1105,9 +1219,12 @@ td{padding:11px 14px;font-size:13px;vertical-align:middle}
         <div id="t-replybox" style="display:none">
           <div class="t-composer-hint" style="display:flex;gap:8px;align-items:center;justify-content:space-between;padding:0 4px 6px">
             <span>Ctrl+Enter to send · Shift+Enter for new line</span>
-            <select class="fsel" id="t-canned" style="padding:6px 10px;font-size:12px" onchange="insertCanned(this.value)">
-              <option value="">Canned reply…</option>
-            </select>
+            <div style="display:flex;gap:6px;align-items:center">
+              <button class="btn sm" id="ai-draft-btn" onclick="generateAiReply()" title="Generate a draft reply with AI">🤖 AI draft</button>
+              <select class="fsel" id="t-canned" style="padding:6px 10px;font-size:12px" onchange="insertCanned(this.value)">
+                <option value="">Canned reply…</option>
+              </select>
+            </div>
           </div>
           <div class="t-composer">
             <textarea id="t-reply-input" placeholder="Reply to this ticket…" rows="1"
@@ -1162,12 +1279,13 @@ let SERVERS = JSON.parse(localStorage.getItem('td_servers') || '[]');
 let CURRENT = parseInt(localStorage.getItem('td_current') || '0');
 let PUSH = { enabled: false, lastSeen: new Set(), timer: null };
 const S = { status:'all', page:1, archPage:1, archResults:[] };
-const CANNED_REPLIES = [
+const DEFAULT_CANNED_REPLIES = [
   { label: 'Hälsning', text: 'Hej! 👋\n\nHur kan vi hjälpa dig idag?' },
   { label: 'Behöver info', text: 'Skulle du kunna ge oss lite mer info:\n- Vad hände?\n- När började det?\n- Skärmdumpar/felmeddelanden?\n\nTack!' },
   { label: 'Jobbar på det', text: 'Tack för ditt tålamod — vi tittar på detta nu och återkommer till dig så snart vi kan.' },
   { label: 'Löst', text: 'Detta bör nu vara löst. Om problemet kvarstår, svara här så hjälper vi dig vidare.' },
 ];
+let CANNED_REPLIES = DEFAULT_CANNED_REPLIES.slice();
 
 function fillCanned() {
   const sel = document.getElementById('t-canned');
@@ -1345,6 +1463,8 @@ function nav(p, btn) {
   if(p==='staff')  loadStaff();
   if(p==='panel-users') loadPanelUsers();
   if(p==='categories') loadCategories();
+  if(p==='templates') loadTemplates();
+  if(p==='ai') loadAiTools();
   if(p==='settings'){ document.getElementById('set-url').value=currentServer()?.url||''; document.getElementById('set-token').value=currentServer()?.token||''; updatePushUI(); }
 }
 
@@ -1678,6 +1798,7 @@ async function refreshTicketChat(id, silent=false){
           <div class="t-meta-key">User</div>
           <div class="t-meta-val">${esc(t.user_tag||t.created_by||'?')}</div>
         </div>
+        ${t.email ? `<div class="t-meta-item"><div class="t-meta-key">E-post</div><div class="t-meta-val">${esc(t.email)}</div></div>` : ''}
         <div class="t-meta-item">
           <div class="t-meta-key">Category</div>
           <div class="t-meta-val">${esc(t.category||t.type||'?')}</div>
@@ -1914,6 +2035,7 @@ function toast(msg,type='ok'){ const el=document.createElement('div'); el.classN
 async function loadAll(){
   updateGuildDisplay();
   fillCanned();
+  await loadReplyTemplatesForComposer();
   await loadTickets();
   loadCategories();
   try{
@@ -2014,6 +2136,200 @@ async function init() {
 }
 
 
+
+
+// ── Reply Templates + AI Tools ───────────────────────────────────────────────
+async function loadReplyTemplatesForComposer() {
+  try {
+    const rows = await api('/api/templates?enabled=1');
+    if (Array.isArray(rows) && rows.length) {
+      CANNED_REPLIES = rows.map(r => ({ id:r.id, label:r.label || r.title, text:r.text || r.content, category:r.category })).filter(r => r.label && r.text);
+      fillCanned();
+    }
+  } catch (e) {
+    // Keep built-in fallback templates if DB/templates API is unavailable.
+  }
+}
+
+function clearTemplateForm() {
+  ['tpl-id','tpl-label','tpl-shortcut','tpl-text'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  const cat = document.getElementById('tpl-category'); if (cat) cat.value = 'General';
+  const sort = document.getElementById('tpl-sort'); if (sort) sort.value = '0';
+  const btn = document.getElementById('tpl-save-btn'); if (btn) btn.textContent = 'Save Template';
+  const msg = document.getElementById('tpl-msg'); if (msg) msg.textContent = '';
+}
+
+async function loadTemplates() {
+  const tbody = document.getElementById('templates-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:30px">Loading…</td></tr>';
+  try {
+    const rows = await api('/api/templates');
+    CANNED_REPLIES = rows.filter(r => r.enabled !== 0).map(r => ({ id:r.id, label:r.label || r.title, text:r.text || r.content, category:r.category })).filter(r => r.label && r.text);
+    fillCanned();
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:30px">No templates yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(t => `
+      <tr>
+        <td><div style="font-weight:600">${esc(t.label||t.title)}</div><div style="font-size:11px;color:var(--text3);max-width:420px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.text||t.content)}</div></td>
+        <td>${esc(t.category||'General')}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--text3)">${esc(t.shortcut||'—')}</td>
+        <td><span class="badge ${t.enabled?'open':'closed'}">${t.enabled?'Enabled':'Disabled'}</span></td>
+        <td style="text-align:right">
+          <button class="btn sm" onclick='editTemplate(${JSON.stringify(t).replace(/'/g,"&#39;")})'>Edit</button>
+          <button class="btn sm" onclick="toggleTemplate(${t.id}, ${t.enabled?0:1})">${t.enabled?'Disable':'Enable'}</button>
+          <button class="btn sm" onclick="deleteTemplate(${t.id}, '${escAttr(t.label||t.title)}')" style="border-color:rgba(248,113,113,.3);color:#f87171">Delete</button>
+        </td>
+      </tr>`).join('');
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:#f87171;padding:30px">${esc(e.message)}</td></tr>`;
+  }
+}
+
+function editTemplate(t) {
+  document.getElementById('tpl-id').value = t.id || '';
+  document.getElementById('tpl-label').value = t.label || t.title || '';
+  document.getElementById('tpl-category').value = t.category || 'General';
+  document.getElementById('tpl-shortcut').value = t.shortcut || '';
+  document.getElementById('tpl-sort').value = t.sort_order || 0;
+  document.getElementById('tpl-text').value = t.text || t.content || '';
+  document.getElementById('tpl-save-btn').textContent = 'Update Template';
+  document.getElementById('tpl-label').scrollIntoView({ behavior:'smooth', block:'center' });
+}
+
+async function saveTemplate() {
+  const id = document.getElementById('tpl-id').value.trim();
+  const payload = {
+    label: document.getElementById('tpl-label').value.trim(),
+    category: document.getElementById('tpl-category').value.trim() || 'General',
+    shortcut: document.getElementById('tpl-shortcut').value.trim(),
+    sort_order: parseInt(document.getElementById('tpl-sort').value || '0'),
+    text: document.getElementById('tpl-text').value.trim(),
+    enabled: 1,
+  };
+  const msg = document.getElementById('tpl-msg');
+  if (!payload.label || !payload.text) { msg.style.color='#f87171'; msg.textContent='Label and text are required.'; return; }
+  try {
+    await api(id ? '/api/templates/' + id : '/api/templates', { method: id ? 'PATCH' : 'POST', body: payload });
+    msg.style.color='#34d399'; msg.textContent = id ? 'Template updated!' : 'Template created!';
+    clearTemplateForm();
+    await loadTemplates();
+  } catch (e) { msg.style.color='#f87171'; msg.textContent=e.message; }
+}
+
+async function toggleTemplate(id, enabled) {
+  try { await api('/api/templates/' + id, { method:'PATCH', body:{ enabled } }); loadTemplates(); } catch(e) { toast(e.message, 'err'); }
+}
+
+async function deleteTemplate(id, label) {
+  if (!confirm('Delete template "' + label + '"?')) return;
+  try { await api('/api/templates/' + id, { method:'DELETE' }); loadTemplates(); } catch(e) { toast(e.message, 'err'); }
+}
+
+async function generateAiReply() {
+  if (!_currentTicketId) return toast('Open a ticket first', 'err');
+  const btn = document.getElementById('ai-draft-btn');
+  const input = document.getElementById('t-reply-input');
+  if (btn) { btn.disabled = true; btn.textContent = 'Thinking…'; }
+  try {
+    const data = await api(`/api/tickets/${_currentTicketId}/ai-reply`, { method:'POST', body:{} });
+    if (!data.reply) throw new Error('No AI reply returned');
+    input.value = (input.value && !input.value.endsWith('\n') ? input.value + '\n\n' : input.value) + data.reply;
+    input.dispatchEvent(new Event('input'));
+    input.focus();
+    toast('AI draft inserted — review before sending', 'ok');
+  } catch(e) { toast(e.message, 'err'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '🤖 AI draft'; } }
+}
+
+function clearFaqForm() {
+  ['faq-id','faq-title','faq-content'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  const cat=document.getElementById('faq-category'); if(cat) cat.value='Support';
+  const msg=document.getElementById('faq-msg'); if(msg) msg.textContent='';
+}
+
+async function loadAiTools() {
+  await Promise.all([loadFaq(), loadAiChannels()]);
+}
+
+async function loadFaq() {
+  const list = document.getElementById('faq-list');
+  if (!list) return;
+  list.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading…</div>';
+  try {
+    const rows = await api('/api/faq');
+    if (!rows.length) { list.innerHTML = '<div style="color:var(--text3);font-size:12px">No FAQ entries yet.</div>'; return; }
+    list.innerHTML = rows.map(f => `
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px">
+        <div style="display:flex;align-items:center;gap:8px;justify-content:space-between"><b>${esc(f.title)}</b><span class="badge ${f.enabled?'open':'closed'}">${f.enabled?'Enabled':'Disabled'}</span></div>
+        <div style="font-size:11px;color:var(--text3);margin:4px 0">${esc(f.category||'general')}</div>
+        <div style="font-size:12px;color:var(--text2);white-space:pre-wrap">${esc(f.content)}</div>
+        <div style="display:flex;gap:6px;margin-top:10px">
+          <button class="btn sm" onclick='editFaq(${JSON.stringify(f).replace(/'/g,"&#39;")})'>Edit</button>
+          <button class="btn sm" onclick="toggleFaq(${f.id}, ${f.enabled?0:1})">${f.enabled?'Disable':'Enable'}</button>
+          <button class="btn sm" onclick="deleteFaq(${f.id})" style="border-color:rgba(248,113,113,.3);color:#f87171">Delete</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { list.innerHTML = `<div style="color:#f87171;font-size:12px">${esc(e.message)}</div>`; }
+}
+
+function editFaq(f) {
+  document.getElementById('faq-id').value = f.id || '';
+  document.getElementById('faq-title').value = f.title || '';
+  document.getElementById('faq-category').value = f.category || 'Support';
+  document.getElementById('faq-content').value = f.content || '';
+}
+
+async function saveFaq() {
+  const id = document.getElementById('faq-id').value.trim();
+  const payload = {
+    title: document.getElementById('faq-title').value.trim(),
+    category: document.getElementById('faq-category').value.trim() || 'Support',
+    content: document.getElementById('faq-content').value.trim(),
+    enabled: 1,
+  };
+  const msg = document.getElementById('faq-msg');
+  if (!payload.title || !payload.content) { msg.style.color='#f87171'; msg.textContent='Title and content required.'; return; }
+  try { await api(id ? '/api/faq/' + id : '/api/faq', { method: id ? 'PUT' : 'POST', body: payload }); msg.style.color='#34d399'; msg.textContent='Saved!'; clearFaqForm(); loadFaq(); }
+  catch(e) { msg.style.color='#f87171'; msg.textContent=e.message; }
+}
+
+async function toggleFaq(id, enabled) { try { await api('/api/faq/' + id, { method:'PUT', body:{ enabled } }); loadFaq(); } catch(e) { toast(e.message, 'err'); } }
+async function deleteFaq(id) { if(!confirm('Delete this FAQ entry?')) return; try { await api('/api/faq/' + id, { method:'DELETE' }); loadFaq(); } catch(e) { toast(e.message, 'err'); } }
+
+async function loadAiChannels() {
+  const list = document.getElementById('ai-channel-list');
+  if (!list) return;
+  list.innerHTML = '<div style="color:var(--text3);font-size:12px">Loading…</div>';
+  try {
+    const rows = await api('/api/ai-channels');
+    if (!rows.length) { list.innerHTML = '<div style="color:var(--text3);font-size:12px">No AI channels configured.</div>'; return; }
+    list.innerHTML = rows.map(c => `
+      <div style="display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px">
+        <div style="flex:1"><b>${esc(c.channel_name||'unknown')}</b><div style="font-family:var(--mono);font-size:11px;color:var(--text3)">${esc(c.channel_id)}</div></div>
+        <span class="badge ${c.enabled?'open':'closed'}">${c.enabled?'Enabled':'Disabled'}</span>
+        <button class="btn sm" onclick="toggleAiChannel(${c.id}, ${c.enabled?0:1})">${c.enabled?'Disable':'Enable'}</button>
+        <button class="btn sm" onclick="deleteAiChannel(${c.id})" style="border-color:rgba(248,113,113,.3);color:#f87171">Delete</button>
+      </div>`).join('');
+  } catch(e) { list.innerHTML = `<div style="color:#f87171;font-size:12px">${esc(e.message)}</div>`; }
+}
+
+async function addAiChannel() {
+  const msg = document.getElementById('ai-channel-msg');
+  const channel_id = document.getElementById('ai-channel-id').value.trim();
+  const channel_name = document.getElementById('ai-channel-name').value.trim() || 'unknown';
+  if (!channel_id) { msg.style.color='#f87171'; msg.textContent='Channel ID required.'; return; }
+  try {
+    await api('/api/ai-channels', { method:'POST', body:{ channel_id, channel_name } });
+    msg.style.color='#34d399'; msg.textContent='Channel added!';
+    document.getElementById('ai-channel-id').value=''; document.getElementById('ai-channel-name').value='';
+    loadAiChannels();
+  } catch(e) { msg.style.color='#f87171'; msg.textContent=e.message; }
+}
+async function toggleAiChannel(id, enabled) { try { await api('/api/ai-channels/' + id, { method:'PUT', body:{ enabled } }); loadAiChannels(); } catch(e) { toast(e.message, 'err'); } }
+async function deleteAiChannel(id) { if(!confirm('Delete this AI channel?')) return; try { await api('/api/ai-channels/' + id, { method:'DELETE' }); loadAiChannels(); } catch(e) { toast(e.message, 'err'); } }
 
 // ── Category Manager ──────────────────────────────────────────────────────────
 async function loadCategories() {
@@ -2341,6 +2657,7 @@ init();
 document.querySelector('[data-page="settings"]')?.addEventListener('click', () => {
   setTimeout(loadUsers, 300);
   setTimeout(loadStaleSettings, 300);
+  setTimeout(loadSmtpSettings, 300);
 });
 // ── Stale Reminder Settings ──────────────────────────────────────────────────
 async function loadStaleSettings() {
@@ -2415,6 +2732,97 @@ async function saveStaleSettings() {
   } catch(e) {
     st.style.color = '#f87171';
     st.textContent = '✗ ' + e.message;
+  }
+}
+
+// ── SMTP Settings ──────────────────────────────────────────────────
+async function loadSmtpSettings() {
+  // Show the section only for admins
+  try {
+    const data = await api('/api/settings');
+    const section = document.getElementById('smtp-settings-section');
+    if (section) section.style.display = 'block';
+    applySmtpSettings(data);
+  } catch(e) {
+    // non-admin or not available — hide section
+    const section = document.getElementById('smtp-settings-section');
+    if (section) section.style.display = 'none';
+  }
+}
+
+function applySmtpSettings(data) {
+  if (!data.smtp) return;
+  const host = document.getElementById('smtp-host');
+  const port = document.getElementById('smtp-port');
+  const user = document.getElementById('smtp-user');
+  const pass = document.getElementById('smtp-pass');
+  const from = document.getElementById('smtp-from');
+  const secure = document.getElementById('smtp-secure');
+  
+  if (host) host.value = data.smtp.host || '';
+  if (port) port.value = data.smtp.port || 587;
+  if (user) user.value = data.smtp.user || '';
+  if (pass) pass.value = data.smtp.pass || '';
+  if (from) from.value = data.smtp.from || '';
+  if (secure) secure.checked = !!data.smtp.secure;
+}
+
+async function saveSmtpSettings() {
+  const st = document.getElementById('smtp-save-st');
+  st.style.color = 'var(--text3)';
+  st.textContent = 'Saving…';
+  
+  const smtp = {
+    host: document.getElementById('smtp-host').value,
+    port: parseInt(document.getElementById('smtp-port').value) || 587,
+    user: document.getElementById('smtp-user').value,
+    pass: document.getElementById('smtp-pass').value,
+    from: document.getElementById('smtp-from').value,
+    secure: document.getElementById('smtp-secure').checked
+  };
+
+  try {
+    await api('/api/settings', { method: 'POST', body: { smtp }});
+    st.style.color = 'var(--green)';
+    st.textContent = '✓ Saved';
+    setTimeout(() => { st.textContent = ''; }, 3000);
+  } catch(e) {
+    st.style.color = '#f87171';
+    st.textContent = '✗ ' + e.message;
+  }
+}
+
+async function testSmtp() {
+  const testBtn = document.getElementById('smtp-test-btn');
+  const originalText = testBtn.textContent;
+  testBtn.disabled = true;
+  testBtn.textContent = 'Sending…';
+
+  try {
+    const testEmail = document.getElementById('smtp-test-email').value;
+    if (!testEmail) {
+      toast('Please enter a test email address', 'err');
+      return;
+    }
+    const smtp = {
+      host: document.getElementById('smtp-host').value,
+      port: parseInt(document.getElementById('smtp-port').value) || 587,
+      user: document.getElementById('smtp-user').value,
+      pass: document.getElementById('smtp-pass').value,
+      from: document.getElementById('smtp-from').value,
+      secure: document.getElementById('smtp-secure').checked
+    };
+
+    await api('/api/settings/test-smtp', { 
+      method: 'POST', 
+      body: { smtp, testEmail }
+    });
+    toast('Test email sent successfully!', 'ok');
+  } catch(e) {
+    toast('Test failed: ' + e.message, 'err');
+  } finally {
+    testBtn.disabled = false;
+    testBtn.textContent = originalText;
   }
 }
 

@@ -60,6 +60,39 @@ async function detectPriority(subject, description) {
   } catch { return 'normal'; }
 }
 
+
+async function draftReply(ticket, messages = [], faqRows = [], templateRows = []) {
+  if (!groq) return null;
+  try {
+    const transcript = messages.slice(-20).map(m => {
+      const who = m.is_staff ? '[STAFF]' : '[USER]';
+      return `${who} ${m.author_tag || 'unknown'}: ${m.content || ''}`;
+    }).join('\n');
+
+    const faq = faqRows
+      .filter(f => f.enabled === undefined || f.enabled)
+      .slice(0, 8)
+      .map(f => `- ${f.title || f.category}: ${f.content}`)
+      .join('\n');
+
+    const templates = templateRows
+      .filter(t => t.enabled === undefined || t.enabled)
+      .slice(0, 10)
+      .map(t => `- ${t.label || t.title}: ${t.text || t.content}`)
+      .join('\n');
+
+    const prompt = `Ticket subject: ${ticket.subject || ''}\nTicket category: ${ticket.category || ticket.type || ''}\nTicket description: ${ticket.description || ''}\n\nConversation so far:\n${transcript || '(no saved messages yet)'}\n\nSaved FAQ / knowledge base:\n${faq || '(none)'}\n\nSaved reply templates:\n${templates || '(none)'}\n\nWrite a helpful staff reply that can be pasted directly into the ticket. Do not close the ticket unless the user clearly says the issue is solved.`;
+
+    return await chat([
+      { role: 'system', content: SYSTEM },
+      { role: 'user', content: prompt }
+    ], 350, 0.45);
+  } catch (err) {
+    console.error('[AI] draftReply:', err.message);
+    return null;
+  }
+}
+
 async function summarise(messages) {
   if (!groq) return null;
   try {
@@ -71,4 +104,4 @@ async function summarise(messages) {
   } catch (err) { console.error('[AI] summarise:', err.message); return null; }
 }
 
-module.exports = { enabled, suggestReply, detectPriority, summarise };
+module.exports = { enabled, suggestReply, detectPriority, draftReply, summarise };

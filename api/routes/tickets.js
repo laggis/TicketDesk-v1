@@ -3,6 +3,7 @@ const router  = express.Router();
 const pool    = require('../../db/pool');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 const { rateLimit } = require('../middleware/rateLimit');
+const ai = require('../../bot/ai');
 
 function escHtml(s) {
   return String(s || '')
@@ -315,6 +316,37 @@ router.get('/user/:discord_id', authenticateToken, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+
+
+// ─── POST /api/tickets/:id/ai-reply ──────────────────────────────────────────
+// Generates a draft reply for the panel composer. It never sends automatically.
+router.post('/:id/ai-reply', authenticateToken, rateLimit({ windowMs: 60_000, max: 20, message: 'Too many AI requests' }), async (req, res, next) => {
+  try {
+    if (!ai.enabled()) return res.status(400).json({ error: 'AI is disabled. Add GROQ_API_KEY to .env and restart TicketDesk.' });
+
+    const [[ticket]] = await pool.query('SELECT * FROM tickets WHERE id = ?', [req.params.id]);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+
+    const [messages] = await pool.query(
+      'SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY sent_at ASC LIMIT 80',
+      [req.params.id]
+    );
+    const [faqRows] = await pool.query('SELECT * FROM ai_faq WHERE enabled = 1 ORDER BY category, title LIMIT 30').catch(() => [[]]);
+    const [templateRows] = await pool.query(
+      `SELECT id,
+        COALESCE(NULLIF(label,''), NULLIF(title,''), shortcut, CONCAT('Template #', id)) AS label,
+        COALESCE(NULLIF(text,''), NULLIF(content,''), '') AS text,
+        category, enabled
+       FROM reply_templates WHERE enabled = 1 ORDER BY sort_order ASC, category ASC LIMIT 30`
+    ).catch(() => [[]]);
+
+    const reply = await ai.draftReply(ticket, messages, faqRows, templateRows);
+    if (!reply) return res.status(500).json({ error: 'Could not generate AI reply' });
+
+    await audit(req, { action: 'ticket_ai_reply', ticketId: req.params.id });
+    res.json({ reply });
+  } catch (err) { next(err); }
+});
 
 // ─── POST /api/tickets/:id/reply ──────────────────────────────────────────────
 // Panel staff sends a message → saved to DB → bot picks it up and posts to Discord
